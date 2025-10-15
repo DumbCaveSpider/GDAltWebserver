@@ -205,12 +205,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if account exists in accounts table and insert/update as needed
+	// Ensure account row exists (insert if new)
 	var storedToken sql.NullString
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
-		// First time account: log an init POST (don't log secrets)
+		// First time account: create a row with provided token
 		log.Printf("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
 		if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
 			log.Printf("save: insert account error: %v", err)
@@ -218,15 +218,23 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case nil:
-		// existing account: verify token matches
-		if !storedToken.Valid || storedToken.String != req.ArgonToken {
-			log.Printf("save: argon token mismatch for account %s", req.AccountId)
-			http.Error(w, "-1", http.StatusForbidden)
-			return
-		}
+		// existing account: do nothing for now, validation happens below
 	default:
 		log.Printf("save: account lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate token using Argon (or DB-stored token if ARGON_BASE_URL not configured)
+	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
+	if verr != nil {
+		log.Printf("save: token validation error for %s: %v", req.AccountId, verr)
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		log.Printf("save: token validation failed for %s", req.AccountId)
+		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
 

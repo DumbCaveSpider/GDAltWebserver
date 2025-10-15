@@ -99,23 +99,16 @@ func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify argon token
-	var storedToken sql.NullString
-	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
-	switch err := row.Scan(&storedToken); err {
-	case sql.ErrNoRows:
-		log.Printf("lastsaved: account not found %s", req.AccountId)
-		http.Error(w, "-1", http.StatusForbidden)
-		return
-	case nil:
-		if !storedToken.Valid || storedToken.String != req.ArgonToken {
-			log.Printf("lastsaved: argon token mismatch for account %s", req.AccountId)
-			http.Error(w, "-1", http.StatusForbidden)
-			return
-		}
-	default:
-		log.Printf("lastsaved: account lookup error: %v", err)
+	// Validate token using Argon helper
+	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
+	if verr != nil {
+		log.Printf("lastsaved: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		log.Printf("lastsaved: token validation failed for %s", req.AccountId)
+		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
 
