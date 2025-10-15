@@ -116,6 +116,35 @@ type authRequest struct {
 	ArgonToken string `json:"argonToken"`
 }
 
+// UnmarshalJSON accepts accountId as a number or string.
+func (a *authRequest) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	// helper
+	get := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := raw[k]; ok && v != nil {
+				switch t := v.(type) {
+				case string:
+					return t
+				case float64:
+					return fmt.Sprintf("%.0f", t)
+				case json.Number:
+					return t.String()
+				default:
+					return fmt.Sprintf("%v", t)
+				}
+			}
+		}
+		return ""
+	}
+	a.AccountId = get("accountId", "account_id")
+	a.ArgonToken = get("argonToken", "argon_token")
+	return nil
+}
+
 // authHandler accepts POST JSON { accountId, argonToken } and returns plain text
 // "1" when the token is valid for the account, or "-1" on failure.
 func authHandler(w http.ResponseWriter, r *http.Request) {
