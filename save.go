@@ -123,7 +123,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
 		// First time account: insert into accounts and attempt to create per-account database
-	if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
+		if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
 			log.Printf("save: insert account error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
