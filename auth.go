@@ -27,12 +27,15 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	row := db.QueryRowContext(ctx, "SELECT argon_token, token_validated_at FROM accounts WHERE account_id = ?", accountID)
 	if err := row.Scan(&storedToken, &tokenValidatedAt); err != nil {
 		if err == sql.ErrNoRows {
+			log.Printf("auth: account not found: %s", accountID)
 			return false, nil // account not found
 		}
+		log.Printf("auth: account lookup error for %s: %v", accountID, err)
 		return false, err
 	}
 
 	if !storedToken.Valid || storedToken.String != token {
+		log.Printf("auth: token mismatch for %s", accountID)
 		return false, nil // token mismatch
 	}
 
@@ -66,6 +69,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("auth: argon request error for %s: %v", accountID, err)
 		return false, err
 	}
 	defer resp.Body.Close()
@@ -73,6 +77,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	if resp.StatusCode != http.StatusOK {
 		// Non-200 from Argon -> treat as transient error
 		body, _ := io.ReadAll(resp.Body)
+		log.Printf("auth: argon validation HTTP %d for %s: %s", resp.StatusCode, accountID, string(body))
 		return false, fmt.Errorf("argon validation HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -82,9 +87,11 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("auth: error reading argon response for %s: %v", accountID, err)
 		return false, err
 	}
 	if err := json.Unmarshal(b, &out); err != nil {
+		log.Printf("auth: error parsing argon response JSON for %s: %v", accountID, err)
 		return false, err
 	}
 
@@ -96,6 +103,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		}
 		return true, nil
 	}
+	log.Printf("auth: argon validation returned invalid for %s", accountID)
 	return false, nil
 }
 
@@ -112,22 +120,26 @@ type authRequest struct {
 // "1" when the token is valid for the account, or "-1" on failure.
 func authHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		log.Printf("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		log.Printf("auth: read body error from %s: %v", r.RemoteAddr, err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 
 	var req authRequest
 	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("auth: json unmarshal error from %s: %v (body len=%d)", r.RemoteAddr, err, len(body))
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
+		log.Printf("auth: missing accountId or argonToken from %s (accountId='%s', tokenPresent=%v)", r.RemoteAddr, req.AccountId, req.ArgonToken != "")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -148,22 +160,26 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
+		log.Printf("auth: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
+		log.Printf("auth: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
+		log.Printf("auth: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
+		log.Printf("auth: token invalid for %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
