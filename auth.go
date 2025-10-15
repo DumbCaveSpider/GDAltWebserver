@@ -98,3 +98,77 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	}
 	return false, nil
 }
+
+func init() {
+	http.HandleFunc("/auth", authHandler)
+}
+
+type authRequest struct {
+	AccountId  string `json:"accountId"`
+	ArgonToken string `json:"argonToken"`
+}
+
+// authHandler accepts POST JSON { accountId, argonToken } and returns plain text
+// "1" when the token is valid for the account, or "-1" on failure.
+func authHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "-1", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "-1", http.StatusBadRequest)
+		return
+	}
+
+	var req authRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "-1", http.StatusBadRequest)
+		return
+	}
+	if req.AccountId == "" || req.ArgonToken == "" {
+		http.Error(w, "-1", http.StatusBadRequest)
+		return
+	}
+
+	// Build DSN from environment variables (same as other handlers)
+	dbUser := os.Getenv("DB_USER")
+	dbPass := os.Getenv("DB_PASS")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+	if dbPort == "" {
+		dbPort = "3306"
+	}
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	if err := db.PingContext(ctx); err != nil {
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+
+	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
+	if verr != nil {
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "-1", http.StatusForbidden)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("1"))
+}
