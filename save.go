@@ -230,12 +230,20 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert the save into central saves table
-	// Insert or overwrite existing save for this account
-	if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data) VALUES (?, ?) ON DUPLICATE KEY UPDATE save_data = VALUES(save_data), created_at = CURRENT_TIMESTAMP", req.AccountId, req.SaveData); err != nil {
-		log.Printf("save: insert/overwrite central save error: %v", err)
+	// Overwrite existing save for this account if present, otherwise insert
+	res, err := db.ExecContext(ctx, "UPDATE saves SET save_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.AccountId)
+	if err != nil {
+		log.Printf("save: update central save error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data) VALUES (?, ?)", req.AccountId, req.SaveData); err != nil {
+			log.Printf("save: insert central save error: %v", err)
+			http.Error(w, "-1", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// No per-account DBs or tables — all saves go into central `saves` table
