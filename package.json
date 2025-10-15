@@ -5,8 +5,8 @@
   "scripts": {
     "build": "go build -o ./bin/gdaltweb.exe .",
     "start": "node -e \"require('child_process').spawnSync('./bin/gdaltweb.exe', {stdio: 'inherit', shell: true})\"",
-    "predev": "npm run build",
-    "dev": "dotenv -e .env -- node -e \"require('child_process').spawnSync('bin\\\\gdaltweb.exe', {stdio: 'inherit', shell: true})\"",
+  "predev": "npm run build",
+  "dev": "dotenv -e .env -- node start.js",
     "dev:printenv": "dotenv -e .env -- node -e \"console.log(process.env.PORT)\""
   },
   "devDependencies": {
