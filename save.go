@@ -11,14 +11,13 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
 type SaveRequest struct {
-	AccountId  int64  `json:"accountId"`
+	AccountId  string `json:"accountId"`
 	SaveData   string `json:"saveData"`
 	ArgonToken string `json:"argonToken"`
 }
@@ -42,7 +41,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
-	if req.AccountId == 0 || req.SaveData == "" || req.ArgonToken == "" {
+	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
 		log.Printf("save: missing accountId, saveData or argonToken")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
@@ -85,7 +84,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Ensure central saves table exists
 	createStmt := `CREATE TABLE IF NOT EXISTS saves (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
-		account_id BIGINT NOT NULL,
+		account_id VARCHAR(255) NOT NULL,
 		save_data LONGTEXT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
@@ -97,7 +96,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure accounts table exists in central DB
 	acctCreate := `CREATE TABLE IF NOT EXISTS accounts (
-		account_id BIGINT PRIMARY KEY,
+		account_id VARCHAR(255) PRIMARY KEY,
 		argon_token VARCHAR(512) NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
@@ -116,7 +115,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		h := sha1.Sum([]byte(s))
 		return hex.EncodeToString(h[:])
 	}
-	accDbName := "acct_" + sanitize(strconv.FormatInt(req.AccountId, 10))
+	accDbName := "acct_" + sanitize(req.AccountId)
 
 	// Check if account exists in accounts table
 	var storedToken sql.NullString
@@ -124,7 +123,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
 		// First time account: insert into accounts and attempt to create per-account database
-		if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
+	if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
 			log.Printf("save: insert account error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
@@ -146,7 +145,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	case nil:
 		// existing account: verify token matches
 		if !storedToken.Valid || storedToken.String != req.ArgonToken {
-			log.Printf("save: argon token mismatch for account %d", req.AccountId)
+			log.Printf("save: argon token mismatch for account %s", req.AccountId)
 			http.Error(w, "-1", http.StatusForbidden)
 			return
 		}
