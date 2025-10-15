@@ -37,9 +37,22 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	var req SaveRequest
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
-		log.Printf("save: decode error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
-		return
+
+		if err := r.ParseForm(); err == nil && len(r.Form) > 0 {
+			// Accept form fields: accountId, accountID, saveData, argonToken
+			if v := r.Form.Get("accountId"); v != "" {
+				req.AccountId = v
+			} else if v := r.Form.Get("accountID"); v != "" {
+				req.AccountId = v
+			}
+			req.SaveData = r.Form.Get("saveData")
+			req.ArgonToken = r.Form.Get("argonToken")
+		} else {
+			log.Printf("save: primary JSON decode error: %v", err)
+			// Return bad request — recommend clients send accountId as a string
+			http.Error(w, "-1", http.StatusBadRequest)
+			return
+		}
 	}
 	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
 		log.Printf("save: missing accountId, saveData or argonToken")
