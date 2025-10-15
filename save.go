@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -35,27 +38,67 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SaveRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
 
-		if err := r.ParseForm(); err == nil && len(r.Form) > 0 {
+	// Read the full request body so we can attempt multiple parsing strategies
+	body, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		log.Printf("save: read body error: %v", readErr)
+		http.Error(w, "-1", http.StatusBadRequest)
+		return
+	}
+
+	// Try JSON first
+	if err := json.Unmarshal(body, &req); err != nil {
+		// JSON failed — log and try fallbacks
+		log.Printf("save: json unmarshal error: %v — attempting fallbacks", err)
+
+		// 1) Try parsing as urlencoded form data
+		if vals, perr := url.ParseQuery(string(body)); perr == nil && len(vals) > 0 {
 			// Accept form fields: accountId, accountID, saveData, argonToken
-			if v := r.Form.Get("accountId"); v != "" {
+			if v := vals.Get("accountId"); v != "" {
 				req.AccountId = v
-			} else if v := r.Form.Get("accountID"); v != "" {
+			} else if v := vals.Get("accountID"); v != "" {
 				req.AccountId = v
 			}
-			req.SaveData = r.Form.Get("saveData")
-			req.ArgonToken = r.Form.Get("argonToken")
+			req.SaveData = vals.Get("saveData")
+			req.ArgonToken = vals.Get("argonToken")
+			log.Printf("save: parsed body as urlencoded form (keys: %v)", strings.Join(keysFromValues(vals), ","))
 		} else {
-			log.Printf("save: primary JSON decode error: %v", err)
-			// Return bad request — recommend clients send accountId as a string
-			http.Error(w, "-1", http.StatusBadRequest)
-			return
+			// 2) Try plain key:value lines (e.g. "accountId:7689052\nsaveData:...\n")
+			text := strings.TrimSpace(string(body))
+			if text != "" {
+				lines := strings.Split(text, "\n")
+				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if line == "" {
+						continue
+					}
+					// Accept both key:value and key=value
+					var parts []string
+					if idx := strings.Index(line, ":"); idx >= 0 {
+						parts = []string{strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])}
+					} else if idx := strings.Index(line, "="); idx >= 0 {
+						parts = []string{strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])}
+					} else {
+						continue
+					}
+					key := strings.ToLower(parts[0])
+					val := parts[1]
+					switch key {
+					case "accountid", "account_id":
+						req.AccountId = val
+					case "savedata", "save_data":
+						req.SaveData = val
+					case "argontoken", "argon_token":
+						req.ArgonToken = val
+					}
+				}
+				log.Printf("save: parsed body as plain lines")
+			}
 		}
 	}
 	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
-		log.Printf("save: missing accountId, saveData or argonToken")
+		log.Printf("save: missing accountId, saveData or argonToken (accountId='%s', saveDataPresent=%v, argonTokenPresent=%v)", req.AccountId, req.SaveData != "", req.ArgonToken != "")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -187,4 +230,13 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("1"))
+}
+
+// keysFromValues returns the list of keys present in url.Values
+func keysFromValues(v url.Values) []string {
+	keys := make([]string, 0, len(v))
+	for k := range v {
+		keys = append(keys, k)
+	}
+	return keys
 }
