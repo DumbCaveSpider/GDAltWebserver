@@ -30,6 +30,24 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 			log.Printf("auth: account not found: %s", accountID)
 			return false, nil // account not found
 		}
+		// If the accounts table is missing, attempt to create it and retry once
+		if strings.Contains(err.Error(), "1146") || strings.Contains(strings.ToLower(err.Error()), "doesn't exist") {
+			log.Printf("auth: accounts table missing, attempting to create it: %v", err)
+			if cerr := createAccountsTableIfMissing(ctx, db); cerr != nil {
+				log.Printf("auth: failed to create accounts table: %v", cerr)
+				return false, err
+			}
+			// retry the query once
+			row = db.QueryRowContext(ctx, "SELECT argon_token, token_validated_at FROM accounts WHERE account_id = ?", accountID)
+			if err2 := row.Scan(&storedToken, &tokenValidatedAt); err2 != nil {
+				if err2 == sql.ErrNoRows {
+					log.Printf("auth: account not found after creating accounts table: %s", accountID)
+					return false, nil
+				}
+				log.Printf("auth: account lookup error after creating accounts table for %s: %v", accountID, err2)
+				return false, err2
+			}
+		}
 		log.Printf("auth: account lookup error for %s: %v", accountID, err)
 		return false, err
 	}
@@ -109,6 +127,20 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 
 func init() {
 	http.HandleFunc("/auth", authHandler)
+}
+
+// createAccountsTableIfMissing creates the central accounts table if it does not exist.
+func createAccountsTableIfMissing(ctx context.Context, db *sql.DB) error {
+	create := `CREATE TABLE IF NOT EXISTS accounts (
+		account_id VARCHAR(255) PRIMARY KEY,
+		argon_token VARCHAR(512) NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		token_validated_at TIMESTAMP NULL
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+	if _, err := db.ExecContext(ctx, create); err != nil {
+		return err
+	}
+	return nil
 }
 
 type authRequest struct {
