@@ -184,7 +184,8 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
 		account_id VARCHAR(255) NOT NULL,
 		save_data LONGTEXT NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY unique_account (account_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
 	if _, err := db.ExecContext(ctx, createStmt); err != nil {
 		log.Printf("save: create table error: %v", err)
@@ -230,8 +231,9 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert the save into central saves table
-	if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data) VALUES (?, ?)", req.AccountId, req.SaveData); err != nil {
-		log.Printf("save: insert central save error: %v", err)
+	// Insert or overwrite existing save for this account
+	if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data) VALUES (?, ?) ON DUPLICATE KEY UPDATE save_data = VALUES(save_data), created_at = CURRENT_TIMESTAMP", req.AccountId, req.SaveData); err != nil {
+		log.Printf("save: insert/overwrite central save error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
