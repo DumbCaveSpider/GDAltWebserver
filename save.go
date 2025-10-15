@@ -135,6 +135,8 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
+		// First time account: log an init POST (don't log secrets)
+		log.Printf("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
 		// First time account: insert into accounts and attempt to create per-account database
 		if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
 			log.Printf("save: insert account error: %v", err)
