@@ -25,6 +25,43 @@ type SaveRequest struct {
 	ArgonToken string `json:"argonToken"`
 }
 
+// UnmarshalJSON implements a tolerant JSON unmarshaller for SaveRequest.
+// It accepts accountId as a number or string and recognizes both
+// "accountId" and "accountID" keys.
+func (s *SaveRequest) UnmarshalJSON(data []byte) error {
+	// Decode into a generic map first
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Helper to fetch a string from possible key variations
+	getStr := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := raw[k]; ok && v != nil {
+				switch t := v.(type) {
+				case string:
+					return t
+				case float64:
+					// JSON numbers decode as float64 — format without decimals
+					return fmt.Sprintf("%.0f", t)
+				case json.Number:
+					return t.String()
+				default:
+					// fallback to string conversion
+					return fmt.Sprintf("%v", t)
+				}
+			}
+		}
+		return ""
+	}
+
+	s.AccountId = getStr("accountId", "account_id")
+	s.SaveData = getStr("saveData", "save_data")
+	s.ArgonToken = getStr("argonToken", "argon_token")
+	return nil
+}
+
 func init() {
 	// register handler on the default mux used by main.go
 	http.HandleFunc("/save", saveHandler)
@@ -50,14 +87,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Try JSON first
 	if err := json.Unmarshal(body, &req); err != nil {
 		// JSON failed — log and try fallbacks
-		log.Printf("save: json unmarshal error: %v — attempting fallbacks", err)
+		log.Printf("save: json unmarshal error: %v — attempting fallbacks (body len=%d)", err, len(body))
 
 		// 1) Try parsing as urlencoded form data
 		if vals, perr := url.ParseQuery(string(body)); perr == nil && len(vals) > 0 {
-			// Accept form fields: accountId, accountID, saveData, argonToken
+			// Accept form fields: accountId, saveData, argonToken
 			if v := vals.Get("accountId"); v != "" {
-				req.AccountId = v
-			} else if v := vals.Get("accountID"); v != "" {
 				req.AccountId = v
 			}
 			req.SaveData = vals.Get("saveData")
@@ -96,9 +131,17 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("save: parsed body as plain lines")
 			}
 		}
+	} else {
+		// JSON unmarshal succeeded
+		log.Printf("save: parsed body as JSON (accountId='%s', saveData len=%d, argonToken len=%d)", req.AccountId, len(req.SaveData), len(req.ArgonToken))
 	}
 	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
-		log.Printf("save: missing accountId, saveData or argonToken (accountId='%s', saveDataPresent=%v, argonTokenPresent=%v)", req.AccountId, req.SaveData != "", req.ArgonToken != "")
+		// Log useful debugging info: content-type, length, and a short
+		// redacted preview of the body so we can see what the client sent
+		// without leaking full secrets.
+		ct := r.Header.Get("Content-Type")
+		bodyPreview := redactPreview(string(body), 200)
+		log.Printf("save: missing accountId, saveData or argonToken (accountId='%s', saveDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.ArgonToken != "", ct, bodyPreview)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -274,4 +317,30 @@ func keysFromValues(v url.Values) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// redactPreview returns a short preview of s (up to maxLen) and masks
+// any long token-like substrings (e.g. argonToken) to avoid leaking
+// secrets in logs.
+func redactPreview(s string, maxLen int) string {
+	if s == "" {
+		return "(empty)"
+	}
+	// Mask common token-like patterns: long dot-separated tokens
+	parts := strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' })
+	for i, p := range parts {
+		if len(p) > 50 {
+			// shorten and mask the middle
+			if len(p) > 20 {
+				parts[i] = p[:10] + "..." + p[len(p)-10:]
+			} else {
+				parts[i] = p[:10] + "..."
+			}
+		}
+	}
+	joined := strings.Join(parts, " ")
+	if len(joined) > maxLen {
+		return joined[:maxLen] + "..."
+	}
+	return joined
 }
