@@ -9,143 +9,90 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
-// ValidateArgonToken validates the provided argon token for accountID.
-// It first checks the stored token in DB matches the provided token. If so,
-// it may optionally call Argon's remote validation endpoint to verify token
-// freshness and caches the result by updating accounts.token_validated_at.
+// ValidateArgonToken validates the provided argon token for accountID by calling
+// Argon's validation endpoint. If valid, it creates/updates the account row with the token.
 //
 // Returns (true, nil) when token is valid, (false, nil) when invalid, and (false, err)
 // when a transient error occurred.
 func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string) (bool, error) {
-	// Quick DB lookup to ensure account exists and token matches
-	var storedToken sql.NullString
-	var tokenValidatedAt sql.NullTime
-	row := db.QueryRowContext(ctx, "SELECT argon_token, token_validated_at FROM accounts WHERE account_id = ?", accountID)
-	if err := row.Scan(&storedToken, &tokenValidatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			log.Printf("auth: account not found: %s — creating account row", accountID)
-			// create account row with provided token
-			if _, cerr := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", accountID, token); cerr != nil {
-				log.Printf("auth: failed to create account row for %s: %v", accountID, cerr)
-				return false, cerr
-			}
-			return true, nil // consider valid after creation
-		}
-		// If the accounts table is missing, attempt to create it and retry once
-		if strings.Contains(err.Error(), "1146") || strings.Contains(strings.ToLower(err.Error()), "doesn't exist") {
-			log.Printf("auth: accounts table missing, attempting to create it: %v", err)
-			if cerr := createAccountsTableIfMissing(ctx, db); cerr != nil {
-				log.Printf("auth: failed to create accounts table: %v", cerr)
-				return false, err
-			}
-			// retry the query once
-			row = db.QueryRowContext(ctx, "SELECT argon_token, token_validated_at FROM accounts WHERE account_id = ?", accountID)
-			if err2 := row.Scan(&storedToken, &tokenValidatedAt); err2 != nil {
-				if err2 == sql.ErrNoRows {
-					log.Printf("auth: account not found after creating accounts table: %s", accountID)
-					return false, nil
-				}
-				log.Printf("auth: account lookup error after creating accounts table for %s: %v", accountID, err2)
-				return false, err2
-			}
-		}
-		log.Printf("auth: account lookup error for %s: %v", accountID, err)
-		return false, err
-	}
-
-	if !storedToken.Valid || storedToken.String != token {
-		log.Printf("auth: token mismatch for %s", accountID)
-		return false, nil // token mismatch
-	}
-
-	// If token_validated_at is recent (within TTL) consider it valid without contacting Argon.
-	ttl := 5 * time.Minute
-	if tv := tokenValidatedAt; tv.Valid {
-		if time.Since(tv.Time) <= ttl {
-			return true, nil
-		}
-	}
-
-	// Call Argon's validation endpoint if configured
-	argonBase := os.Getenv("ARGON_BASE_URL")
-	if argonBase == "" {
-		// Not configured: accept DB-stored token as authoritative
-		return true, nil
-	}
-
-	// Build request: GET {ARGON_BASE_URL}/v1/validation/check?token={token}
-	url := strings.TrimRight(argonBase, "/") + "/v1/validation/check?token=" + token
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Always call Argon's validation endpoint to verify token
+	argonURL := "https://argon.globed.dev/v1/validation/check?token=" + token
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, argonURL, nil)
 	if err != nil {
+		log.Printf("auth: failed to create argon request for %s: %v", accountID, err)
 		return false, err
 	}
 
-	// Optional: allow ARGON_API_KEY to be used as a header when present
-	if k := os.Getenv("ARGON_API_KEY"); k != "" {
-		req.Header.Set("Authorization", "Bearer "+k)
-	}
-
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("auth: argon request error for %s: %v (falling back to DB token)", accountID, err)
-		return true, nil // fall back to accepting DB-stored token as valid
+		log.Printf("auth: argon request error for %s: %v", accountID, err)
+		return false, err
 	}
 	defer resp.Body.Close()
 
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("auth: error reading argon response for %s: %v", accountID, err)
+		return false, err
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		// Non-200 from Argon -> log and fall back to DB token as authoritative
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("auth: argon validation HTTP %d for %s (falling back to DB token): %s", resp.StatusCode, accountID, string(body))
-		return true, nil // fall back to accepting DB-stored token as valid
+		log.Printf("auth: argon validation HTTP %d for %s: %s", resp.StatusCode, accountID, string(body))
+		return false, nil // invalid token
 	}
 
 	// Parse response expecting JSON: { valid: true/false }
 	var out struct {
 		Valid bool `json:"valid"`
 	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("auth: error reading argon response for %s: %v", accountID, err)
-		return false, err
-	}
-	if err := json.Unmarshal(b, &out); err != nil {
+	if err := json.Unmarshal(body, &out); err != nil {
 		log.Printf("auth: error parsing argon response JSON for %s: %v", accountID, err)
 		return false, err
 	}
 
-	if out.Valid {
-		// Update token_validated_at to now
-		if _, err := db.ExecContext(ctx, "UPDATE accounts SET token_validated_at = CURRENT_TIMESTAMP WHERE account_id = ?", accountID); err != nil {
-			// Log but still return success
-			log.Printf("auth: failed to update token_validated_at for %s: %v", accountID, err)
-		}
-		return true, nil
+	if !out.Valid {
+		log.Printf("auth: argon validation returned invalid for %s", accountID)
+		return false, nil
 	}
-	log.Printf("auth: argon validation returned invalid for %s", accountID)
-	return false, nil
+
+	// Token is valid - ensure account row exists and update token
+	log.Printf("auth: argon validation successful for %s", accountID)
+
+	// Check if account exists
+	var existingToken sql.NullString
+	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", accountID)
+	err = row.Scan(&existingToken)
+
+	if err == sql.ErrNoRows {
+		// Account doesn't exist - create it
+		log.Printf("auth: creating new account row for %s", accountID)
+		if _, cerr := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token, token_validated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", accountID, token); cerr != nil {
+			log.Printf("auth: failed to create account row for %s: %v", accountID, cerr)
+			return false, cerr
+		}
+	} else if err != nil {
+		// Database error
+		log.Printf("auth: account lookup error for %s: %v", accountID, err)
+		return false, err
+	} else {
+		// Account exists - update token and timestamp
+		log.Printf("auth: updating token for existing account %s", accountID)
+		if _, uerr := db.ExecContext(ctx, "UPDATE accounts SET argon_token = ?, token_validated_at = CURRENT_TIMESTAMP WHERE account_id = ?", token, accountID); uerr != nil {
+			log.Printf("auth: failed to update token for %s: %v", accountID, uerr)
+			return false, uerr
+		}
+	}
+
+	return true, nil
 }
 
 func init() {
 	http.HandleFunc("/auth", authHandler)
-}
-
-// createAccountsTableIfMissing creates the central accounts table if it does not exist.
-func createAccountsTableIfMissing(ctx context.Context, db *sql.DB) error {
-	create := `CREATE TABLE IF NOT EXISTS accounts (
-		account_id VARCHAR(255) PRIMARY KEY,
-		argon_token VARCHAR(512) NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		token_validated_at TIMESTAMP NULL
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
-	if _, err := db.ExecContext(ctx, create); err != nil {
-		return err
-	}
-	return nil
 }
 
 type authRequest struct {
