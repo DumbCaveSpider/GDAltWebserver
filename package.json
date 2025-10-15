@@ -1,0 +1,18 @@
+{
+  "name": "gdalternativeweb-server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "go build -o ./bin/gdaltweb.exe .",
+    "start": "node -e \"require('child_process').spawnSync('./bin/gdaltweb.exe', {stdio: 'inherit', shell: true})\"",
+    "predev": "npm run build",
+    "dev": "dotenv -e .env -- node -e \"require('child_process').spawnSync('bin\\\\gdaltweb.exe', {stdio: 'inherit', shell: true})\"",
+    "dev:printenv": "dotenv -e .env -- node -e \"console.log(process.env.PORT)\""
+  },
+  "devDependencies": {
+    "dotenv-cli": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}
