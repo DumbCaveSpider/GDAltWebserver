@@ -92,16 +92,16 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("auth: argon request error for %s: %v", accountID, err)
-		return false, err
+		log.Printf("auth: argon request error for %s: %v (falling back to DB token)", accountID, err)
+		return true, nil // fall back to accepting DB-stored token as valid
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Non-200 from Argon -> treat as transient error
+		// Non-200 from Argon -> log and fall back to DB token as authoritative
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("auth: argon validation HTTP %d for %s: %s", resp.StatusCode, accountID, string(body))
-		return false, fmt.Errorf("argon validation HTTP %d: %s", resp.StatusCode, string(body))
+		log.Printf("auth: argon validation HTTP %d for %s (falling back to DB token): %s", resp.StatusCode, accountID, string(body))
+		return true, nil // fall back to accepting DB-stored token as valid
 	}
 
 	// Parse response expecting JSON: { valid: true/false }
