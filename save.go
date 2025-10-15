@@ -132,8 +132,10 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		// JSON unmarshal succeeded
-		log.Printf("save: parsed body as JSON (accountId='%s', saveData len=%d, argonToken len=%d)", req.AccountId, len(req.SaveData), len(req.ArgonToken))
+		// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
+		savePreview := redactPreview(req.SaveData, 120)
+		argonPreview := redactPreview(req.ArgonToken, 80)
+		log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, argonPreview)
 	}
 	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
 		// Log useful debugging info: content-type, length, and a short
