@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -19,7 +20,13 @@ import (
 // when a transient error occurred.
 func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string) (bool, error) {
 	// Always call Argon's validation endpoint to verify token
-	argonURL := "https://argon.globed.dev/v1/validation/check?token=" + token
+	base := "https://argon.globed.dev/v1/validation/check"
+	u, _ := url.Parse(base)
+	q := u.Query()
+	q.Set("account_id", accountID)
+	q.Set("authtoken", token)
+	u.RawQuery = q.Encode()
+	argonURL := u.String()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, argonURL, nil)
 	if err != nil {
 		log.Printf("auth: failed to create argon request for %s: %v", accountID, err)
@@ -50,13 +57,17 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	var out struct {
 		Valid bool `json:"valid"`
 	}
+
+	// Log the raw response for debugging
+	log.Printf("auth: argon response for %s (status %d): %s", accountID, resp.StatusCode, string(body))
+
 	if err := json.Unmarshal(body, &out); err != nil {
 		log.Printf("auth: error parsing argon response JSON for %s: %v", accountID, err)
 		return false, err
 	}
 
 	if !out.Valid {
-		log.Printf("auth: argon validation returned invalid for %s", accountID)
+		log.Printf("auth: argon validation returned valid=false for %s", accountID)
 		return false, nil
 	}
 
