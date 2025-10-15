@@ -26,6 +26,11 @@ func main() {
 		log.Printf("DB migration warning: %v", err)
 	}
 
+	// Ensure saves table exists as well
+	if err := ensureSavesMigration(); err != nil {
+		log.Printf("DB migration warning (saves): %v", err)
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("pong: %s", r.RemoteAddr)
 	})
@@ -102,6 +107,43 @@ func ensureAccountsMigration() error {
 		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
 			return err
 		}
+	}
+	return nil
+}
+
+// ensureSavesMigration ensures the central saves table exists.
+func ensureSavesMigration() error {
+	dbUser := os.Getenv("DB_USER")
+	dbPass := os.Getenv("DB_PASS")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+	if dbUser == "" || dbHost == "" || dbName == "" {
+		return fmt.Errorf("missing DB env vars for migration")
+	}
+	if dbPort == "" {
+		dbPort = "3306"
+	}
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createStmt := `CREATE TABLE IF NOT EXISTS saves (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		account_id VARCHAR(255) NOT NULL,
+		save_data LONGTEXT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY unique_account (account_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+
+	if _, err := db.ExecContext(ctx, createStmt); err != nil {
+		return err
 	}
 	return nil
 }

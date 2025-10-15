@@ -27,8 +27,13 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	row := db.QueryRowContext(ctx, "SELECT argon_token, token_validated_at FROM accounts WHERE account_id = ?", accountID)
 	if err := row.Scan(&storedToken, &tokenValidatedAt); err != nil {
 		if err == sql.ErrNoRows {
-			log.Printf("auth: account not found: %s", accountID)
-			return false, nil // account not found
+			log.Printf("auth: account not found: %s — creating account row", accountID)
+			// create account row with provided token
+			if _, cerr := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", accountID, token); cerr != nil {
+				log.Printf("auth: failed to create account row for %s: %v", accountID, cerr)
+				return false, cerr
+			}
+			return true, nil // consider valid after creation
 		}
 		// If the accounts table is missing, attempt to create it and retry once
 		if strings.Contains(err.Error(), "1146") || strings.Contains(strings.ToLower(err.Error()), "doesn't exist") {
