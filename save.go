@@ -175,6 +175,9 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if account exists in accounts table
 	var storedToken sql.NullString
+	// perAcctTarget records where to insert per-account saves. It may be
+	// "`<db>`.saves" or a central table name like "`saves_<id>`".
+	var perAcctTarget string
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
@@ -186,19 +189,39 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
 		}
-		// Create per-account database
+		// Try to create a separate per-account database. If the DB user
+		// lacks permission to CREATE DATABASE (common on managed hosts),
+		// fall back to creating a per-account table in the central DB.
+		perAcctTarget = "" // SQL target for inserts (e.g. `acct_x`.saves or `saves_acct_x`)
+
 		createDbStmt := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", accDbName)
 		if _, err := db.ExecContext(ctx, createDbStmt); err != nil {
-			log.Printf("save: create account database error: %v", err)
-			http.Error(w, "-1", http.StatusInternalServerError)
-			return
-		}
-		// Create saves table inside per-account DB
-		createPerAcct := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.saves ( id BIGINT AUTO_INCREMENT PRIMARY KEY, account_id VARCHAR(255) NOT NULL, save_data LONGTEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", accDbName)
-		if _, err := db.ExecContext(ctx, createPerAcct); err != nil {
-			log.Printf("save: create per-account saves table error: %v", err)
-			http.Error(w, "-1", http.StatusInternalServerError)
-			return
+			// If access denied to create databases, fall back to central table
+			log.Printf("save: create account database error: %v — will fall back to central per-account table if permitted", err)
+			if strings.Contains(err.Error(), "Access denied") || strings.Contains(err.Error(), "1044") {
+				// create a per-account table in the central DB named saves_<sanitized>
+				tbl := "saves_" + sanitize(req.AccountId)
+				perAcctTarget = fmt.Sprintf("`%s`", tbl)
+				createPerAcctCentral := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s ( id BIGINT AUTO_INCREMENT PRIMARY KEY, account_id VARCHAR(255) NOT NULL, save_data LONGTEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", perAcctTarget)
+				if _, err := db.ExecContext(ctx, createPerAcctCentral); err != nil {
+					log.Printf("save: create central per-account table error: %v", err)
+					http.Error(w, "-1", http.StatusInternalServerError)
+					return
+				}
+			} else {
+				log.Printf("save: create account database error: %v", err)
+				http.Error(w, "-1", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// Created (or ensured) per-account database; create its saves table
+			createPerAcct := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.saves ( id BIGINT AUTO_INCREMENT PRIMARY KEY, account_id VARCHAR(255) NOT NULL, save_data LONGTEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", accDbName)
+			if _, err := db.ExecContext(ctx, createPerAcct); err != nil {
+				log.Printf("save: create per-account saves table error: %v", err)
+				http.Error(w, "-1", http.StatusInternalServerError)
+				return
+			}
+			perAcctTarget = fmt.Sprintf("`%s`.saves", accDbName)
 		}
 	case nil:
 		// existing account: verify token matches
@@ -220,8 +243,20 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Also insert into per-account DB saves table (if exists)
-	perAcctInsert := fmt.Sprintf("INSERT INTO `%s`.saves (account_id, save_data) VALUES (?, ?)", accDbName)
+	// Also insert into per-account DB/table saves table (if exists). Use
+	// perAcctTarget (set earlier) which is either "`db`.saves" or a
+	// central table name like "`saves_<id>`".
+	target := "`" + accDbName + "`.saves"
+	if perAcctTarget != "" {
+		// perAcctTarget may be "`db`.saves" or "`saves_<id>`"
+		if strings.Contains(perAcctTarget, ".") {
+			target = perAcctTarget
+		} else {
+			// central table case
+			target = perAcctTarget
+		}
+	}
+	perAcctInsert := fmt.Sprintf("INSERT INTO %s (account_id, save_data) VALUES (?, ?)", target)
 	if _, err := db.ExecContext(ctx, perAcctInsert, req.AccountId, req.SaveData); err != nil {
 		log.Printf("save: insert per-account save error (continuing): %v", err)
 		// don't fail the whole request for per-account insert failure — we already inserted centrally
