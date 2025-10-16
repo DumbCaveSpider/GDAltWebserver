@@ -217,12 +217,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("1"))
 }
 
-// keysFromValues returns the list of keys present in url.Values
-// keysFromValues removed — save handler now accepts JSON only.
-
-// redactPreview returns a short preview of s (up to maxLen) and masks
-// any long token-like substrings (e.g. argonToken) to avoid leaking
-// secrets in logs.
+// redactPreview returns a shortened preview of s, masking long token-like patterns.
 func redactPreview(s string, maxLen int) string {
 	if s == "" {
 		return "(empty)"

@@ -100,8 +100,7 @@ func ensureAccountsMigration() error {
 		return err
 	}
 
-	// If token_validated_at column doesn't exist, try to add it (safe with IF NOT EXISTS not supported on older MySQL)
-	// We'll attempt an ALTER and ignore error if it's duplicate column.
+	// If token_validated_at column doesn't exist, add it
 	if _, err := db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN token_validated_at TIMESTAMP NULL"); err != nil {
 		// Check error text to see if column already exists; if so ignore.
 		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
