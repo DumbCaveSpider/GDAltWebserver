@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -73,7 +72,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req SaveRequest
 
-	// Read the full request body so we can attempt multiple parsing strategies
+	// Read the full request body
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		log.Printf("save: read body error: %v", readErr)
@@ -81,63 +80,20 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try JSON first
+	// JSON unmarshal error handling with detailed logging
 	if err := json.Unmarshal(body, &req); err != nil {
-		// JSON failed — log and try fallbacks
-		log.Printf("save: json unmarshal error: %v — attempting fallbacks (body len=%d)", err, len(body))
-
-		// 1) Try parsing as urlencoded form data
-		if vals, perr := url.ParseQuery(string(body)); perr == nil && len(vals) > 0 {
-			// Accept form fields: accountId, saveData, argonToken
-			if v := vals.Get("accountId"); v != "" {
-				req.AccountId = v
-			}
-			req.SaveData = vals.Get("saveData")
-			req.ArgonToken = vals.Get("argonToken")
-			log.Printf("save: parsed body as urlencoded form (keys: %v)", strings.Join(keysFromValues(vals), ","))
-		} else {
-			// 2) Try plain key:value lines (e.g. "accountId:7689052\nsaveData:...\n")
-			text := strings.TrimSpace(string(body))
-			if text != "" {
-				lines := strings.Split(text, "\n")
-				for _, line := range lines {
-					line = strings.TrimSpace(line)
-					if line == "" {
-						continue
-					}
-					// Accept both key:value and key=value
-					var parts []string
-					if idx := strings.Index(line, ":"); idx >= 0 {
-						parts = []string{strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])}
-					} else if idx := strings.Index(line, "="); idx >= 0 {
-						parts = []string{strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])}
-					} else {
-						continue
-					}
-					key := strings.ToLower(parts[0])
-					val := parts[1]
-					switch key {
-					case "accountid", "account_id":
-						req.AccountId = val
-					case "savedata", "save_data":
-						req.SaveData = val
-					case "argontoken", "argon_token":
-						req.ArgonToken = val
-					}
-				}
-				log.Printf("save: parsed body as plain lines")
-			}
-		}
-	} else {
-		// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
-		savePreview := redactPreview(req.SaveData, 120)
-		argonPreview := redactPreview(req.ArgonToken, 80)
-		log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, argonPreview)
+		bodyPreview := redactPreview(string(body), 200)
+		log.Printf("save: json unmarshal error: %v content-type=%s bodyPreview=%s", err, r.Header.Get("Content-Type"), bodyPreview)
+		http.Error(w, "-1", http.StatusBadRequest)
+		return
 	}
+
+	// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
+	savePreview := redactPreview(req.SaveData, 120)
+	argonPreview := redactPreview(req.ArgonToken, 80)
+	log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, argonPreview)
 	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
-		// Log useful debugging info: content-type, length, and a short
-		// redacted preview of the body so we can see what the client sent
-		// without leaking full secrets.
+		// Log debugging info
 		ct := r.Header.Get("Content-Type")
 		bodyPreview := redactPreview(string(body), 200)
 		log.Printf("save: missing accountId, saveData or argonToken (accountId='%s', saveDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.ArgonToken != "", ct, bodyPreview)
@@ -262,13 +218,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // keysFromValues returns the list of keys present in url.Values
-func keysFromValues(v url.Values) []string {
-	keys := make([]string, 0, len(v))
-	for k := range v {
-		keys = append(keys, k)
-	}
-	return keys
-}
+// keysFromValues removed — save handler now accepts JSON only.
 
 // redactPreview returns a short preview of s (up to maxLen) and masks
 // any long token-like substrings (e.g. argonToken) to avoid leaking
