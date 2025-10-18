@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -172,7 +174,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	case sql.ErrNoRows:
 		// First time account: create a row with provided token
 		log.Printf("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
-		if _, err := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
+		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
 			log.Printf("save: insert account error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
@@ -199,7 +201,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Overwrite existing save for this account if present, otherwise insert
-	res, err := db.ExecContext(ctx, "UPDATE saves SET save_data = ?, level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.LevelData, req.AccountId)
+	res, err := execWithRetries(ctx, db, "UPDATE saves SET save_data = ?, level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.LevelData, req.AccountId)
 	if err != nil {
 		log.Printf("save: update central save error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
@@ -207,7 +209,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, req.SaveData, req.LevelData); err != nil {
+		if _, err := execWithRetries(ctx, db, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, req.SaveData, req.LevelData); err != nil {
 			log.Printf("save: insert central save error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
@@ -243,4 +245,58 @@ func redactPreview(s string, maxLen int) string {
 		return joined[:maxLen] + "..."
 	}
 	return joined
+}
+
+// isTransient tries to identify transient network/connection errors that may
+// succeed on retry (e.g. connection reset by peer, i/o timeout, driver.BadConn).
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	// unwrap common wrapped errors
+	if errors.Is(err, driver.ErrBadConn) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "connection reset by peer"):
+		return true
+	case strings.Contains(msg, "broken pipe"):
+		return true
+	case strings.Contains(msg, "i/o timeout"):
+		return true
+	case strings.Contains(msg, "connection refused"):
+		return true
+	case strings.Contains(msg, "tls: handshake timeout"):
+		return true
+	case strings.Contains(msg, "use of closed network connection"):
+		return true
+	}
+	return false
+}
+
+// execWithRetries executes a query and retries a few times when a transient
+// error is detected. It respects the provided context for cancellation.
+func execWithRetries(ctx context.Context, db *sql.DB, query string, args ...interface{}) (sql.Result, error) {
+	var res sql.Result
+	var err error
+	backoff := 200 * time.Millisecond
+	for attempt := 1; attempt <= 3; attempt++ {
+		res, err = db.ExecContext(ctx, query, args...)
+		if err == nil {
+			return res, nil
+		}
+		if isTransient(err) && attempt < 3 {
+			log.Printf("save: transient db error (attempt %d): %v; retrying after %s", attempt, err, backoff)
+			select {
+			case <-time.After(backoff):
+				backoff *= 2
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		break
+	}
+	return res, err
 }
