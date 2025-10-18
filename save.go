@@ -97,11 +97,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	levelPreview := redactPreview(req.LevelData, 120)
 	argonPreview := redactPreview(req.ArgonToken, 80)
 	log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
-	if req.AccountId == "" || req.SaveData == "" || req.LevelData == "" || req.ArgonToken == "" {
+	// Require accountId and argonToken, and at least one of saveData or levelData
+	if req.AccountId == "" || req.ArgonToken == "" || (req.SaveData == "" && req.LevelData == "") {
 		// Log debugging info
 		ct := r.Header.Get("Content-Type")
 		bodyPreview := redactPreview(string(body), 200)
-		log.Printf("save: missing accountId, saveData, levelData or argonToken (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
+		log.Printf("save: missing accountId/argonToken or neither saveData nor levelData provided (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -201,7 +202,24 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Overwrite existing save for this account if present, otherwise insert
-	res, err := execWithRetries(ctx, db, "UPDATE saves SET save_data = ?, level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.LevelData, req.AccountId)
+	// Build conditional UPDATE to only change provided fields so partial updates are possible
+	var updateQuery string
+	var updateArgs []interface{}
+	var setParts []string
+	if req.SaveData != "" {
+		setParts = append(setParts, "save_data = ?")
+		updateArgs = append(updateArgs, req.SaveData)
+	}
+	if req.LevelData != "" {
+		setParts = append(setParts, "level_data = ?")
+		updateArgs = append(updateArgs, req.LevelData)
+	}
+	// always update timestamp when any data is updated
+	setParts = append(setParts, "created_at = CURRENT_TIMESTAMP")
+	updateQuery = fmt.Sprintf("UPDATE saves SET %s WHERE account_id = ?", strings.Join(setParts, ", "))
+	updateArgs = append(updateArgs, req.AccountId)
+
+	res, err := execWithRetries(ctx, db, updateQuery, updateArgs...)
 	if err != nil {
 		// Detailed diagnostics to help identify whether this is a large-payload issue
 		saveSize := len(req.SaveData)
@@ -224,7 +242,16 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		if _, err := execWithRetries(ctx, db, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, req.SaveData, req.LevelData); err != nil {
+		// No existing row; insert a new one. If one of the fields is missing, insert an empty string so future partial updates work.
+		saveVal := req.SaveData
+		levelVal := req.LevelData
+		if saveVal == "" {
+			saveVal = ""
+		}
+		if levelVal == "" {
+			levelVal = ""
+		}
+		if _, err := execWithRetries(ctx, db, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, saveVal, levelVal); err != nil {
 			log.Printf("save: insert central save error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
