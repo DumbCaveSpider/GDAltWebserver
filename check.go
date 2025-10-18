@@ -115,37 +115,37 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	       // Get save_data and level_data lengths in bytes
-	       var saveData, levelData sql.NullString
-	       r2 := db.QueryRowContext(ctx, "SELECT save_data, level_data FROM saves WHERE account_id = ?", req.AccountId)
-	       if err := r2.Scan(&saveData, &levelData); err != nil {
-		       if err == sql.ErrNoRows {
-			       // not found
-			       w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			       w.WriteHeader(http.StatusOK)
-			       _, _ = w.Write([]byte(`{"saveData":0,"levelData":0}`))
-			       return
-		       }
-		       log.Printf("check: save lookup error: %v", err)
-		       http.Error(w, "-1", http.StatusInternalServerError)
-		       return
-	       }
-	       saveLen := 0
-	       levelLen := 0
-	       if saveData.Valid {
-		       saveLen = len(saveData.String)
-	       }
-	       if levelData.Valid {
-		       levelLen = len(levelData.String)
-	       }
-	       resp := struct {
-		       SaveData  int `json:"saveData"`
-		       LevelData int `json:"levelData"`
-	       }{
-		       SaveData:  saveLen,
-		       LevelData: levelLen,
-	       }
-	       w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	       w.WriteHeader(http.StatusOK)
-	       json.NewEncoder(w).Encode(resp)
+	// Get save_data and level_data lengths in bytes
+	var saveData, levelData sql.NullString
+	r2 := db.QueryRowContext(ctx, "SELECT save_data, level_data FROM saves WHERE account_id = ?", req.AccountId)
+	if err := r2.Scan(&saveData, &levelData); err != nil {
+		if err == sql.ErrNoRows {
+			// not found
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"saveData":0,"levelData":0}`))
+			return
+		}
+		log.Printf("check: save lookup error: %v", err)
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+	saveLen := 0
+	levelLen := 0
+	if saveData.Valid {
+		saveLen = len(saveData.String)
+	}
+	if levelData.Valid {
+		levelLen = len(levelData.String)
+	}
+	resp := struct {
+		SaveData  int `json:"saveData"`
+		LevelData int `json:"levelData"`
+	}{
+		SaveData:  saveLen,
+		LevelData: levelLen,
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }
