@@ -18,6 +18,7 @@ import (
 type SaveRequest struct {
 	AccountId  string `json:"accountId"`
 	SaveData   string `json:"saveData"`
+	LevelData  string `json:"levelData"`
 	ArgonToken string `json:"argonToken"`
 }
 
@@ -54,6 +55,7 @@ func (s *SaveRequest) UnmarshalJSON(data []byte) error {
 
 	s.AccountId = getStr("accountId", "account_id")
 	s.SaveData = getStr("saveData", "save_data")
+	s.LevelData = getStr("levelData", "level_data")
 	s.ArgonToken = getStr("argonToken", "argon_token")
 	return nil
 }
@@ -90,13 +92,14 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
 	savePreview := redactPreview(req.SaveData, 120)
+	levelPreview := redactPreview(req.LevelData, 120)
 	argonPreview := redactPreview(req.ArgonToken, 80)
-	log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, argonPreview)
-	if req.AccountId == "" || req.SaveData == "" || req.ArgonToken == "" {
+	log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
+	if req.AccountId == "" || req.SaveData == "" || req.LevelData == "" || req.ArgonToken == "" {
 		// Log debugging info
 		ct := r.Header.Get("Content-Type")
 		bodyPreview := redactPreview(string(body), 200)
-		log.Printf("save: missing accountId, saveData or argonToken (accountId='%s', saveDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.ArgonToken != "", ct, bodyPreview)
+		log.Printf("save: missing accountId, saveData, levelData or argonToken (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -140,6 +143,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
 		account_id VARCHAR(255) NOT NULL,
 		save_data LONGTEXT NOT NULL,
+		level_data LONGTEXT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE KEY unique_account (account_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
@@ -195,7 +199,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Overwrite existing save for this account if present, otherwise insert
-	res, err := db.ExecContext(ctx, "UPDATE saves SET save_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.AccountId)
+	res, err := db.ExecContext(ctx, "UPDATE saves SET save_data = ?, level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.LevelData, req.AccountId)
 	if err != nil {
 		log.Printf("save: update central save error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
@@ -203,7 +207,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data) VALUES (?, ?)", req.AccountId, req.SaveData); err != nil {
+		if _, err := db.ExecContext(ctx, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, req.SaveData, req.LevelData); err != nil {
 			log.Printf("save: insert central save error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
