@@ -203,7 +203,22 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Overwrite existing save for this account if present, otherwise insert
 	res, err := execWithRetries(ctx, db, "UPDATE saves SET save_data = ?, level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?", req.SaveData, req.LevelData, req.AccountId)
 	if err != nil {
+		// Detailed diagnostics to help identify whether this is a large-payload issue
+		saveSize := len(req.SaveData)
+		levelSize := len(req.LevelData)
+		totalSize := saveSize + levelSize
+		stats := db.Stats()
 		log.Printf("save: update central save error: %v", err)
+		log.Printf("save: payload sizes: save=%d bytes level=%d bytes total=%d bytes", saveSize, levelSize, totalSize)
+		log.Printf("save: db stats: OpenConnections=%d InUse=%d Idle=%d WaitCount=%d MaxOpenConnections=%d", stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.MaxOpenConnections)
+
+		// Try a small probe write to check whether small writes succeed
+		if _, perr := execWithRetries(ctx, db, "SET @probe = 1"); perr != nil {
+			log.Printf("save: small probe write failed: %v", perr)
+		} else {
+			log.Printf("save: small probe write succeeded — large payload may be the cause")
+		}
+
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
