@@ -107,6 +107,14 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Hard limit for levelData: 32 MiB (33554432 bytes)
+	const maxLevelDataSize = 33554432
+	if len(req.LevelData) > maxLevelDataSize {
+		log.Printf("save: levelData size %d exceeds hard limit of %d bytes", len(req.LevelData), maxLevelDataSize)
+		http.Error(w, "-1", http.StatusRequestEntityTooLarge)
+		return
+	}
+
 	// Build DSN from environment variables
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
