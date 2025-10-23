@@ -50,7 +50,7 @@ func init() {
 func checkHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Warn("check: invalid method %s", r.Method)
+		log.Debug("check: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)

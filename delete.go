@@ -50,7 +50,7 @@ func init() {
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Warn("delete: invalid method %s", r.Method)
+		log.Debug("delete: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)

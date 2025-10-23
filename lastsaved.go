@@ -50,7 +50,7 @@ func init() {
 func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Warn("lastsaved: invalid method %s", r.Method)
+		log.Debug("lastsaved: invalid method %s", r.Method)
 		return
 	}
 

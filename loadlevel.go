@@ -22,7 +22,7 @@ func init() {
 func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Warn("loadlevel: invalid method %s", r.Method)
+		log.Debug("loadlevel: invalid method %s", r.Method)
 		return
 	}
 

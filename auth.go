@@ -145,7 +145,7 @@ func (a *authRequest) UnmarshalJSON(data []byte) error {
 // "1" when the token is valid for the account, or "-1" on failure.
 func authHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		log.Warn("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
+		log.Debug("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
 		return
 	}
