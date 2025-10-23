@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	lastSaveMu sync.Mutex
-	lastSaveAt = make(map[string]time.Time) // accountId -> last save time
+	rateMu       sync.Mutex
+	rateRequests = make(map[string][]time.Time)
 )
 
 type SaveRequest struct {
@@ -97,27 +97,54 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate limit: per-account minimum interval between saves
-	minIntervalSec := 10
-	if v := os.Getenv("SAVE_MIN_INTERVAL_SECONDS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
-			minIntervalSec = parsed
+	// Rate limit: count-based sliding window per account
+	// Defaults: 10 requests per 10 seconds
+	maxReqs := 10
+	if v := os.Getenv("RATE_LIMIT_MAX_REQUESTS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxReqs = parsed
 		}
 	}
-	minInterval := time.Duration(minIntervalSec) * time.Second
+	windowSec := 10
+	if v := os.Getenv("RATE_LIMIT_WINDOW_SECONDS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			windowSec = parsed
+		}
+	}
+	window := time.Duration(windowSec) * time.Second
+
 	now := time.Now()
-	if req.AccountId != "" && minInterval > 0 {
-		lastSaveMu.Lock()
-		last, ok := lastSaveAt[req.AccountId]
-		if ok && now.Sub(last) < minInterval {
-			lastSaveMu.Unlock()
-			log.Warn("save: rate limited account %s last=%s now=%s minInterval=%s", req.AccountId, last.Format(time.RFC3339), now.Format(time.RFC3339), minInterval)
-			http.Error(w, "-1", http.StatusTooManyRequests)
+	if req.AccountId != "" && maxReqs > 0 && window > 0 {
+		rateMu.Lock()
+		timestamps := rateRequests[req.AccountId]
+		// drop old timestamps outside the window
+		cutoff := now.Add(-window)
+		i := 0
+		for ; i < len(timestamps); i++ {
+			if timestamps[i].After(cutoff) {
+				break
+			}
+		}
+		if i > 0 {
+			timestamps = timestamps[i:]
+		}
+		if len(timestamps) >= maxReqs {
+			// compute Retry-After as time until the oldest remaining timestamp exits the window
+			retryAfter := window - now.Sub(timestamps[0])
+			rateRequests[req.AccountId] = timestamps
+			rateMu.Unlock()
+			if retryAfter < 0 {
+				retryAfter = 0
+			}
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())))
+			log.Warn("save: rate limited account %s requests=%d window=%s", req.AccountId, len(timestamps), window)
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
-		// update last save time optimistically — if the DB insert fails, it's still considered a recent attempt
-		lastSaveAt[req.AccountId] = now
-		lastSaveMu.Unlock()
+		// append current timestamp and store
+		timestamps = append(timestamps, now)
+		rateRequests[req.AccountId] = timestamps
+		rateMu.Unlock()
 	}
 
 	// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
