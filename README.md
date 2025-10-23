@@ -1,0 +1,56 @@
+# Alternative Geometry Dash Account Backup Server
+
+The backend server for [GD Account Backup](https://github.com/DumbCaveSpider/GDAccountBackup).
+
+## Usage (Server)
+You need the following requirements to run the server:
+- [Node.js](https://nodejs.org/) (v23 or higher)
+- [Go Language](https://go.dev/) 1.25.1 or higher
+- A database (e.g., MySQL, PostgreSQL)
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/DumbCaveSpider/GDAlternativeWeb.git
+cd GDAlternativeWeb
+```
+
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Build the server:
+
+```bash
+npm run build
+```
+
+4. Configure the server by creating a `.env` file in the root directory with the following content:
+
+```env
+DB_USER=<your_database_user>
+DB_PASS=<your_database_password>
+DB_HOST=<your_database_host>
+DB_PORT=<your_database_port>
+DB_NAME=<your_database_name>
+ARGON_BASE_URL=https://argon.globed.dev/
+RATE_LIMIT_MAX_REQUESTS=10
+RATE_LIMIT_WINDOW_SECONDS=10
+MAX_LEVEL_DATA_SIZE_BYTES=33554432
+MAX_ACCOUNT_DATA_SIZE_BYTES=16777216
+LOG_LEVEL=1 # 0=Error, 1=Info, 2=Debug
+PORT=3001
+```
+
+5. Run the server:
+
+```bash
+npm run dev
+```
+
+The server will start on `http://localhost:3001` by default.
+
+## Usage (Client)
+Go to the mod settings of Account Backup in Geometry Dash and set the Backup Server URL to your server's address (e.g., `http://localhost:3001`).
