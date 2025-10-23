@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
 // Reuse LoadRequest type defined in load.go
@@ -21,25 +22,25 @@ func init() {
 func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Printf("loadlevel: invalid method %s", r.Method)
+		log.Warn("loadlevel: invalid method %s", r.Method)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("loadlevel: read body error: %v", err)
+		log.Warn("loadlevel: read body error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 
 	var req LoadRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("loadlevel: json unmarshal error: %v", err)
+		log.Error("loadlevel: json unmarshal error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Printf("loadlevel: missing accountId or argonToken")
+		log.Warn("loadlevel: missing accountId or argonToken")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -60,14 +61,14 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("loadlevel: db open error: %v", err)
+		log.Error("loadlevel: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("loadlevel: db ping error: %v", err)
+		log.Error("loadlevel: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -75,12 +76,12 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate token using Argon helper
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
-		log.Printf("loadlevel: token validation error for %s: %v", req.AccountId, verr)
+		log.Error("loadlevel: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		log.Printf("loadlevel: token validation failed for %s", req.AccountId)
+		log.Warn("loadlevel: token validation failed for %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
@@ -94,7 +95,7 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "-1", http.StatusNotFound)
 			return
 		}
-		log.Printf("loadlevel: save lookup error: %v", err)
+		log.Error("loadlevel: save lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}

@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
 type DeleteRequest struct {
@@ -49,23 +50,23 @@ func init() {
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Printf("delete: invalid method %s", r.Method)
+		log.Warn("delete: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("delete: read body error: %v", err)
+		log.Warn("delete: read body error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	var req DeleteRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("delete: json unmarshal error: %v", err)
+		log.Warn("delete: json unmarshal error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Printf("delete: missing accountId or argonToken")
+		log.Warn("delete: missing accountId or argonToken")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -86,14 +87,14 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("delete: db open error: %v", err)
+		log.Error("delete: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("delete: db ping error: %v", err)
+		log.Error("delete: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -103,24 +104,24 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
-		log.Printf("delete: account not found %s", req.AccountId)
+		log.Warn("delete: account not found %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	case nil:
 		if !storedToken.Valid || storedToken.String != req.ArgonToken {
-			log.Printf("delete: argon token mismatch for account %s", req.AccountId)
+			log.Warn("delete: argon token mismatch for account %s", req.AccountId)
 			http.Error(w, "-1", http.StatusForbidden)
 			return
 		}
 	default:
-		log.Printf("delete: account lookup error: %v", err)
+		log.Error("delete: account lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 
 	// Delete saves for account
 	if _, err := db.ExecContext(ctx, "DELETE FROM saves WHERE account_id = ?", req.AccountId); err != nil {
-		log.Printf("delete: delete save error: %v", err)
+		log.Error("delete: delete save error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}

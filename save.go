@@ -8,13 +8,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
+
 	_ "github.com/go-sql-driver/mysql"
+)
+
+var (
+	lastSaveMu sync.Mutex
+	lastSaveAt = make(map[string]time.Time) // accountId -> last save time
 )
 
 type SaveRequest struct {
@@ -24,9 +32,6 @@ type SaveRequest struct {
 	ArgonToken string `json:"argonToken"`
 }
 
-// UnmarshalJSON implements a tolerant JSON unmarshaller for SaveRequest.
-// It accepts accountId as a number or string and recognizes both
-// "accountId" and "accountID" keys.
 func (s *SaveRequest) UnmarshalJSON(data []byte) error {
 	// Decode into a generic map first
 	var raw map[string]any
@@ -70,7 +75,7 @@ func init() {
 func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Printf("save: invalid method %s", r.Method)
+		log.Warn("save: invalid method %s", r.Method)
 		return
 	}
 
@@ -79,7 +84,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Read the full request body
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
-		log.Printf("save: read body error: %v", readErr)
+		log.Warn("save: read body error: %v", readErr)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -87,30 +92,70 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// JSON unmarshal error handling with detailed logging
 	if err := json.Unmarshal(body, &req); err != nil {
 		bodyPreview := redactPreview(string(body), 200)
-		log.Printf("save: json unmarshal error: %v content-type=%s bodyPreview=%s", err, r.Header.Get("Content-Type"), bodyPreview)
+		log.Warn("save: json unmarshal error: %v content-type=%s bodyPreview=%s", err, r.Header.Get("Content-Type"), bodyPreview)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
+	}
+
+	// Rate limit: per-account minimum interval between saves
+	minIntervalSec := 10
+	if v := os.Getenv("SAVE_MIN_INTERVAL_SECONDS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			minIntervalSec = parsed
+		}
+	}
+	minInterval := time.Duration(minIntervalSec) * time.Second
+	now := time.Now()
+	if req.AccountId != "" && minInterval > 0 {
+		lastSaveMu.Lock()
+		last, ok := lastSaveAt[req.AccountId]
+		if ok && now.Sub(last) < minInterval {
+			lastSaveMu.Unlock()
+			log.Warn("save: rate limited account %s last=%s now=%s minInterval=%s", req.AccountId, last.Format(time.RFC3339), now.Format(time.RFC3339), minInterval)
+			http.Error(w, "-1", http.StatusTooManyRequests)
+			return
+		}
+		// update last save time optimistically — if the DB insert fails, it's still considered a recent attempt
+		lastSaveAt[req.AccountId] = now
+		lastSaveMu.Unlock()
 	}
 
 	// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
 	savePreview := redactPreview(req.SaveData, 120)
 	levelPreview := redactPreview(req.LevelData, 120)
 	argonPreview := redactPreview(req.ArgonToken, 80)
-	log.Printf("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
+	log.Debug("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
 	// Require accountId and argonToken, and at least one of saveData or levelData
 	if req.AccountId == "" || req.ArgonToken == "" || (req.SaveData == "" && req.LevelData == "") {
 		// Log debugging info
 		ct := r.Header.Get("Content-Type")
 		bodyPreview := redactPreview(string(body), 200)
-		log.Printf("save: missing accountId/argonToken or neither saveData nor levelData provided (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
+		log.Warn("save: missing accountId/argonToken or neither saveData nor levelData provided (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 
 	// Hard limit for levelData: 32 MiB (33554432 bytes)
-	const maxLevelDataSize = 33554432
+	maxLevelDataSize := 33554432
+	if v := os.Getenv("MAX_LEVEL_DATA_SIZE_BYTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxLevelDataSize = parsed
+		}
+	}
 	if len(req.LevelData) > maxLevelDataSize {
-		log.Printf("save: levelData size %d exceeds hard limit of %d bytes", len(req.LevelData), maxLevelDataSize)
+		log.Warn("save: levelData size %d exceeds hard limit of %d bytes", len(req.LevelData), maxLevelDataSize)
+		http.Error(w, "-1", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	maxAccountDataSize := 16777216 // 16 MiB
+	if v := os.Getenv("MAX_ACCOUNT_DATA_SIZE_BYTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxAccountDataSize = parsed
+		}
+	}
+	if len(req.SaveData) > maxAccountDataSize {
+		log.Warn("save: saveData size %d exceeds hard limit of %d bytes", len(req.SaveData), maxAccountDataSize)
 		http.Error(w, "-1", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -122,7 +167,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
 	if dbUser == "" || dbHost == "" || dbName == "" {
-		log.Printf("save: missing DB_* env vars (DB_USER, DB_HOST, DB_NAME required)")
+		log.Error("save: missing DB_* env vars (DB_USER, DB_HOST, DB_NAME required)")
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -137,14 +182,14 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("save: db open error: %v", err)
+		log.Error("save: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("save: db ping error: %v", err)
+		log.Error("save: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -159,7 +204,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		UNIQUE KEY unique_account (account_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
 	if _, err := db.ExecContext(ctx, createStmt); err != nil {
-		log.Printf("save: create table error: %v", err)
+		log.Error("save: create table error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -171,7 +216,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
 	if _, err := db.ExecContext(ctx, acctCreate); err != nil {
-		log.Printf("save: create accounts table error: %v", err)
+		log.Error("save: create accounts table error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -182,16 +227,16 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
 		// First time account: create a row with provided token
-		log.Printf("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
+		log.Error("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
 		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
-			log.Printf("save: insert account error: %v", err)
+			log.Error("save: insert account error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
 		}
 	case nil:
 		// existing account: do nothing for now, validation happens below
 	default:
-		log.Printf("save: account lookup error: %v", err)
+		log.Error("save: account lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -199,12 +244,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate token using Argon (or DB-stored token if ARGON_BASE_URL not configured)
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
-		log.Printf("save: token validation error for %s: %v", req.AccountId, verr)
+		log.Error("save: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		log.Printf("save: token validation failed for %s", req.AccountId)
+		log.Warn("save: token validation failed for %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
@@ -234,15 +279,15 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		levelSize := len(req.LevelData)
 		totalSize := saveSize + levelSize
 		stats := db.Stats()
-		log.Printf("save: update central save error: %v", err)
-		log.Printf("save: payload sizes: save=%d bytes level=%d bytes total=%d bytes", saveSize, levelSize, totalSize)
-		log.Printf("save: db stats: OpenConnections=%d InUse=%d Idle=%d WaitCount=%d MaxOpenConnections=%d", stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.MaxOpenConnections)
+		log.Error("save: update central save error: %v", err)
+		log.Debug("save: payload sizes: save=%d bytes level=%d bytes total=%d bytes", saveSize, levelSize, totalSize)
+		log.Debug("save: db stats: OpenConnections=%d InUse=%d Idle=%d WaitCount=%d MaxOpenConnections=%d", stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.MaxOpenConnections)
 
 		// Try a small probe write to check whether small writes succeed
 		if _, perr := execWithRetries(ctx, db, "SET @probe = 1"); perr != nil {
-			log.Printf("save: small probe write failed: %v", perr)
+			log.Error("save: small probe write failed: %v", perr)
 		} else {
-			log.Printf("save: small probe write succeeded — large payload may be the cause")
+			log.Info("save: small probe write succeeded — large payload may be the cause")
 		}
 
 		http.Error(w, "-1", http.StatusInternalServerError)
@@ -260,7 +305,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			levelVal = ""
 		}
 		if _, err := execWithRetries(ctx, db, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, saveVal, levelVal); err != nil {
-			log.Printf("save: insert central save error: %v", err)
+			log.Error("save: insert central save error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
 		}
@@ -337,7 +382,7 @@ func execWithRetries(ctx context.Context, db *sql.DB, query string, args ...inte
 			return res, nil
 		}
 		if isTransient(err) && attempt < 3 {
-			log.Printf("save: transient db error (attempt %d): %v; retrying after %s", attempt, err, backoff)
+			log.Debug("save: transient db error (attempt %d): %v; retrying after %s", attempt, err, backoff)
 			select {
 			case <-time.After(backoff):
 				backoff *= 2

@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
+
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
 // ValidateArgonToken validates the provided argon token for accountID by calling
@@ -29,14 +30,14 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	argonURL := u.String()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, argonURL, nil)
 	if err != nil {
-		log.Printf("auth: failed to create argon request for %s: %v", accountID, err)
+		log.Warn("auth: failed to create argon request for %s: %v", accountID, err)
 		return false, err
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("auth: argon request error for %s: %v", accountID, err)
+		log.Warn("auth: argon request error for %s: %v", accountID, err)
 		return false, err
 	}
 	defer resp.Body.Close()
@@ -44,12 +45,12 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("auth: error reading argon response for %s: %v", accountID, err)
+		log.Warn("auth: error reading argon response for %s: %v", accountID, err)
 		return false, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("auth: argon validation HTTP %d for %s: %s", resp.StatusCode, accountID, string(body))
+		log.Warn("auth: argon validation HTTP %d for %s: %s", resp.StatusCode, accountID, string(body))
 		return false, nil // invalid token
 	}
 
@@ -59,20 +60,20 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	}
 
 	// Log the raw response for debugging
-	log.Printf("auth: argon response for %s (status %d): %s", accountID, resp.StatusCode, string(body))
+	log.Debug("auth: argon response for %s (status %d): %s", accountID, resp.StatusCode, string(body))
 
 	if err := json.Unmarshal(body, &out); err != nil {
-		log.Printf("auth: error parsing argon response JSON for %s: %v", accountID, err)
+		log.Warn("auth: error parsing argon response JSON for %s: %v", accountID, err)
 		return false, err
 	}
 
 	if !out.Valid {
-		log.Printf("auth: argon validation returned valid=false for %s", accountID)
+		log.Warn("auth: argon validation returned valid=false for %s", accountID)
 		return false, nil
 	}
 
 	// Token is valid - ensure account row exists and update token
-	log.Printf("auth: argon validation successful for %s", accountID)
+	log.Info("auth: argon validation successful for %s", accountID)
 
 	// Check if account exists
 	var existingToken sql.NullString
@@ -81,20 +82,20 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 
 	if err == sql.ErrNoRows {
 		// Account doesn't exist - create it
-		log.Printf("auth: creating new account row for %s", accountID)
+		log.Info("auth: creating new account row for %s", accountID)
 		if _, cerr := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token, token_validated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", accountID, token); cerr != nil {
-			log.Printf("auth: failed to create account row for %s: %v", accountID, cerr)
+			log.Error("auth: failed to create account row for %s: %v", accountID, cerr)
 			return false, cerr
 		}
 	} else if err != nil {
 		// Database error
-		log.Printf("auth: account lookup error for %s: %v", accountID, err)
+		log.Error("auth: account lookup error for %s: %v", accountID, err)
 		return false, err
 	} else {
 		// Account exists - update token and timestamp
-		log.Printf("auth: updating token for existing account %s", accountID)
+		log.Info("auth: updating token for existing account %s", accountID)
 		if _, uerr := db.ExecContext(ctx, "UPDATE accounts SET argon_token = ?, token_validated_at = CURRENT_TIMESTAMP WHERE account_id = ?", token, accountID); uerr != nil {
-			log.Printf("auth: failed to update token for %s: %v", accountID, uerr)
+			log.Error("auth: failed to update token for %s: %v", accountID, uerr)
 			return false, uerr
 		}
 	}
@@ -144,26 +145,26 @@ func (a *authRequest) UnmarshalJSON(data []byte) error {
 // "1" when the token is valid for the account, or "-1" on failure.
 func authHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		log.Printf("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
+		log.Warn("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("auth: read body error from %s: %v", r.RemoteAddr, err)
+		log.Warn("auth: read body error from %s: %v", r.RemoteAddr, err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 
 	var req authRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("auth: json unmarshal error from %s: %v (body len=%d)", r.RemoteAddr, err, len(body))
+		log.Warn("auth: json unmarshal error from %s: %v (body len=%d)", r.RemoteAddr, err, len(body))
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Printf("auth: missing accountId or argonToken from %s (accountId='%s', tokenPresent=%v)", r.RemoteAddr, req.AccountId, req.ArgonToken != "")
+		log.Warn("auth: missing accountId or argonToken from %s (accountId='%s', tokenPresent=%v)", r.RemoteAddr, req.AccountId, req.ArgonToken != "")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -184,26 +185,26 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("auth: db open error: %v", err)
+		log.Error("auth: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("auth: db ping error: %v", err)
+		log.Error("auth: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
-		log.Printf("auth: token validation error for %s: %v", req.AccountId, verr)
+		log.Error("auth: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		log.Printf("auth: token invalid for %s", req.AccountId)
+		log.Warn("auth: token invalid for %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}

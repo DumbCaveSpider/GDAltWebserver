@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
 type CheckRequest struct {
@@ -49,23 +50,23 @@ func init() {
 func checkHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Printf("check: invalid method %s", r.Method)
+		log.Warn("check: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("check: read body error: %v", err)
+		log.Warn("check: read body error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	var req CheckRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("check: json unmarshal error: %v", err)
+		log.Warn("check: json unmarshal error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Printf("check: missing accountId or argonToken")
+		log.Warn("check: missing accountId or argonToken")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -86,13 +87,13 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("check: db open error: %v", err)
+		log.Error("check: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("check: db ping error: %v", err)
+		log.Error("check: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -110,7 +111,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		log.Printf("check: account lookup error: %v", err)
+		log.Error("check: account lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -126,7 +127,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"saveData":0,"levelData":0}`))
 			return
 		}
-		log.Printf("check: save lookup error: %v", err)
+		log.Error("check: save lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}

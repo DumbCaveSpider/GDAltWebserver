@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
 type LastSavedRequest struct {
@@ -49,25 +50,25 @@ func init() {
 func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Printf("lastsaved: invalid method %s", r.Method)
+		log.Warn("lastsaved: invalid method %s", r.Method)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("lastsaved: read body error: %v", err)
+		log.Warn("lastsaved: read body error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 
 	var req LastSavedRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("lastsaved: json unmarshal error: %v", err)
+		log.Warn("lastsaved: json unmarshal error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Printf("lastsaved: missing accountId or argonToken")
+		log.Warn("lastsaved: missing accountId or argonToken")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -87,14 +88,14 @@ func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("lastsaved: db open error: %v", err)
+		log.Error("lastsaved: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("lastsaved: db ping error: %v", err)
+		log.Error("lastsaved: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -102,12 +103,12 @@ func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate token using Argon helper
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
-		log.Printf("lastsaved: token validation error for %s: %v", req.AccountId, verr)
+		log.Error("lastsaved: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		log.Printf("lastsaved: token validation failed for %s", req.AccountId)
+		log.Warn("lastsaved: token validation failed for %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
@@ -120,7 +121,7 @@ func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "-1", http.StatusNotFound)
 			return
 		}
-		log.Printf("lastsaved: created_at lookup error: %v", err)
+		log.Error("lastsaved: created_at lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}

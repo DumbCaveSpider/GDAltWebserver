@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
 type LoadRequest struct {
@@ -51,13 +52,13 @@ func init() {
 func loadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "-1", http.StatusMethodNotAllowed)
-		log.Printf("load: invalid method %s", r.Method)
+		log.Warn("load: invalid method %s", r.Method)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("load: read body error: %v", err)
+		log.Warn("load: read body error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -65,12 +66,12 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	var req LoadRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		// try fallback simple parsing (urlencoded not necessary here)
-		log.Printf("load: json unmarshal error: %v", err)
+		log.Warn("load: json unmarshal error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Printf("load: missing accountId or argonToken")
+		log.Warn("load: missing accountId or argonToken")
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}
@@ -91,14 +92,14 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Printf("load: db open error: %v", err)
+		log.Error("load: db open error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Printf("load: db ping error: %v", err)
+		log.Error("load: db ping error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
@@ -106,12 +107,12 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate token using Argon helper
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
-		log.Printf("load: token validation error for %s: %v", req.AccountId, verr)
+		log.Error("load: token validation error for %s: %v", req.AccountId, verr)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		log.Printf("load: token validation failed for %s", req.AccountId)
+		log.Warn("load: token validation failed for %s", req.AccountId)
 		http.Error(w, "-1", http.StatusForbidden)
 		return
 	}
@@ -125,7 +126,7 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "-1", http.StatusNotFound)
 			return
 		}
-		log.Printf("load: save lookup error: %v", err)
+		log.Error("load: save lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}

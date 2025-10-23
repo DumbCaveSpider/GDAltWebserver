@@ -4,44 +4,44 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 	_ "github.com/go-sql-driver/mysql"
 )
 
 func main() {
 	// Check DB connectivity once at startup (non-fatal)
 	if err := checkDB(); err != nil {
-		log.Printf("DB check failed: %v", err)
+		log.Error("DB check failed: %v", err)
 	} else {
-		log.Printf("DB check: connected OK")
+		log.Done("DB check: connected OK")
 	}
 
 	// Run lightweight DB migration to ensure accounts table has token_validated_at
 	if err := ensureAccountsMigration(); err != nil {
-		log.Printf("DB migration warning: %v", err)
+		log.Warn("DB migration warning: %v", err)
 	}
 
 	// Ensure saves table exists as well
 	if err := ensureSavesMigration(); err != nil {
-		log.Printf("DB migration warning (saves): %v", err)
+		log.Warn("DB migration warning (saves): %v", err)
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("pong: %s", r.RemoteAddr)
+		log.Print("pong: %s", r.RemoteAddr)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("🗣️🔥"))
 	})
 
 	addr := ":3001"
-	log.Printf("starting server on %s", addr)
+	log.Done("starting server on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatalf("server failed: %v", err)
+		log.Error("server failed: %v", err)
 	}
 }
 
