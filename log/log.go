@@ -23,9 +23,9 @@ func getLogLevel() int {
 	if cached {
 		return LogLevel
 	} else {
-		level, done := os.LookupEnv("LOG_LEVEL")
+		level := os.Getenv("LOG_LEVEL")
 
-		if done {
+		if level != "" {
 			val, err := strconv.Atoi(level)
 
 			if err == nil {
