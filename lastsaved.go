@@ -100,7 +100,6 @@ func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate token using Argon helper
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("lastsaved: token validation error for %s: %v", req.AccountId, verr)
@@ -113,7 +112,6 @@ func lastSavedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch created_at from saves table
 	var createdAt sql.NullTime
 	r2 := db.QueryRowContext(ctx, "SELECT created_at FROM saves WHERE account_id = ?", req.AccountId)
 	if err := r2.Scan(&createdAt); err != nil {

@@ -12,17 +12,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 
 	_ "github.com/go-sql-driver/mysql"
-)
-
-var (
-	rateMu       sync.Mutex
-	rateRequests = make(map[string][]time.Time)
 )
 
 type SaveRequest struct {
@@ -33,13 +27,11 @@ type SaveRequest struct {
 }
 
 func (s *SaveRequest) UnmarshalJSON(data []byte) error {
-	// Decode into a generic map first
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 
-	// Helper to fetch a string from possible key variations
 	getStr := func(keys ...string) string {
 		for _, k := range keys {
 			if v, ok := raw[k]; ok && v != nil {
@@ -47,12 +39,10 @@ func (s *SaveRequest) UnmarshalJSON(data []byte) error {
 				case string:
 					return t
 				case float64:
-					// JSON numbers decode as float64 — format without decimals
 					return fmt.Sprintf("%.0f", t)
 				case json.Number:
 					return t.String()
 				default:
-					// fallback to string conversion
 					return fmt.Sprintf("%v", t)
 				}
 			}
@@ -68,7 +58,6 @@ func (s *SaveRequest) UnmarshalJSON(data []byte) error {
 }
 
 func init() {
-	// register handler on the default mux used by main.go
 	http.HandleFunc("/save", saveHandler)
 }
 
@@ -81,7 +70,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req SaveRequest
 
-	// Read the full request body
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		log.Warn("save: read body error: %v", readErr)
@@ -89,7 +77,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// JSON unmarshal error handling with detailed logging
 	if err := json.Unmarshal(body, &req); err != nil {
 		bodyPreview := redactPreview(string(body), 200)
 		log.Warn("save: json unmarshal error: %v content-type=%s bodyPreview=%s", err, r.Header.Get("Content-Type"), bodyPreview)
@@ -97,64 +84,11 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate limit: count-based sliding window per account
-	// Defaults: 10 requests per 10 seconds
-	maxReqs := 10
-	if v := os.Getenv("RATE_LIMIT_MAX_REQUESTS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			maxReqs = parsed
-		}
-	}
-	windowSec := 10
-	if v := os.Getenv("RATE_LIMIT_WINDOW_SECONDS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			windowSec = parsed
-		}
-	}
-	window := time.Duration(windowSec) * time.Second
-
-	now := time.Now()
-	if req.AccountId != "" && maxReqs > 0 && window > 0 {
-		rateMu.Lock()
-		timestamps := rateRequests[req.AccountId]
-		// drop old timestamps outside the window
-		cutoff := now.Add(-window)
-		i := 0
-		for ; i < len(timestamps); i++ {
-			if timestamps[i].After(cutoff) {
-				break
-			}
-		}
-		if i > 0 {
-			timestamps = timestamps[i:]
-		}
-		if len(timestamps) >= maxReqs {
-			// compute Retry-After as time until the oldest remaining timestamp exits the window
-			retryAfter := window - now.Sub(timestamps[0])
-			rateRequests[req.AccountId] = timestamps
-			rateMu.Unlock()
-			if retryAfter < 0 {
-				retryAfter = 0
-			}
-			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())))
-			log.Warn("save: rate limited account %s requests=%d window=%s", req.AccountId, len(timestamps), window)
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-			return
-		}
-		// append current timestamp and store
-		timestamps = append(timestamps, now)
-		rateRequests[req.AccountId] = timestamps
-		rateMu.Unlock()
-	}
-
-	// JSON unmarshal succeeded — log a redacted preview of saveData for diagnostics
 	savePreview := redactPreview(req.SaveData, 120)
 	levelPreview := redactPreview(req.LevelData, 120)
 	argonPreview := redactPreview(req.ArgonToken, 80)
 	log.Debug("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
-	// Require accountId and argonToken, and at least one of saveData or levelData
 	if req.AccountId == "" || req.ArgonToken == "" || (req.SaveData == "" && req.LevelData == "") {
-		// Log debugging info
 		ct := r.Header.Get("Content-Type")
 		bodyPreview := redactPreview(string(body), 200)
 		log.Warn("save: missing accountId/argonToken or neither saveData nor levelData provided (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
@@ -162,7 +96,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hard limit for levelData: 32 MiB (33554432 bytes)
+	// hard limit 32 MiB
 	maxLevelDataSize := 33554432
 	if v := os.Getenv("MAX_LEVEL_DATA_SIZE_BYTES"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
@@ -187,7 +121,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build DSN from environment variables
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
@@ -221,7 +154,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure central saves table exists
 	createStmt := `CREATE TABLE IF NOT EXISTS saves (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
 		account_id VARCHAR(255) NOT NULL,
@@ -236,7 +168,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure accounts table exists in central DB
 	acctCreate := `CREATE TABLE IF NOT EXISTS accounts (
 		account_id VARCHAR(255) PRIMARY KEY,
 		argon_token VARCHAR(512) NOT NULL,
@@ -248,12 +179,10 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure account row exists (insert if new)
 	var storedToken sql.NullString
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
-		// First time account: create a row with provided token
 		log.Error("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
 		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
 			log.Error("save: insert account error: %v", err)
@@ -261,14 +190,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case nil:
-		// existing account: do nothing for now, validation happens below
 	default:
 		log.Error("save: account lookup error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
 
-	// Validate token using Argon (or DB-stored token if ARGON_BASE_URL not configured)
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("save: token validation error for %s: %v", req.AccountId, verr)
@@ -281,8 +208,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Overwrite existing save for this account if present, otherwise insert
-	// Build conditional UPDATE to only change provided fields so partial updates are possible
 	var updateQuery string
 	var updateArgs []interface{}
 	var setParts []string
@@ -294,14 +219,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		setParts = append(setParts, "level_data = ?")
 		updateArgs = append(updateArgs, req.LevelData)
 	}
-	// always update timestamp when any data is updated
 	setParts = append(setParts, "created_at = CURRENT_TIMESTAMP")
 	updateQuery = fmt.Sprintf("UPDATE saves SET %s WHERE account_id = ?", strings.Join(setParts, ", "))
 	updateArgs = append(updateArgs, req.AccountId)
 
 	res, err := execWithRetries(ctx, db, updateQuery, updateArgs...)
 	if err != nil {
-		// Detailed diagnostics to help identify whether this is a large-payload issue
 		saveSize := len(req.SaveData)
 		levelSize := len(req.LevelData)
 		totalSize := saveSize + levelSize
@@ -310,7 +233,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		log.Debug("save: payload sizes: save=%d bytes level=%d bytes total=%d bytes", saveSize, levelSize, totalSize)
 		log.Debug("save: db stats: OpenConnections=%d InUse=%d Idle=%d WaitCount=%d MaxOpenConnections=%d", stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.MaxOpenConnections)
 
-		// Try a small probe write to check whether small writes succeed
 		if _, perr := execWithRetries(ctx, db, "SET @probe = 1"); perr != nil {
 			log.Error("save: small probe write failed: %v", perr)
 		} else {
@@ -322,7 +244,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		// No existing row; insert a new one. If one of the fields is missing, insert an empty string so future partial updates work.
 		saveVal := req.SaveData
 		levelVal := req.LevelData
 		if saveVal == "" {
@@ -338,23 +259,18 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// No per-account DBs or tables — all saves go into central `saves` table
-
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("1"))
 }
 
-// redactPreview returns a shortened preview of s, masking long token-like patterns.
 func redactPreview(s string, maxLen int) string {
 	if s == "" {
 		return "(empty)"
 	}
-	// Mask common token-like patterns: long dot-separated tokens
 	parts := strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' })
 	for i, p := range parts {
 		if len(p) > 50 {
-			// shorten and mask the middle
 			if len(p) > 20 {
 				parts[i] = p[:10] + "..." + p[len(p)-10:]
 			} else {
@@ -369,13 +285,10 @@ func redactPreview(s string, maxLen int) string {
 	return joined
 }
 
-// isTransient tries to identify transient network/connection errors that may
-// succeed on retry (e.g. connection reset by peer, i/o timeout, driver.BadConn).
 func isTransient(err error) bool {
 	if err == nil {
 		return false
 	}
-	// unwrap common wrapped errors
 	if errors.Is(err, driver.ErrBadConn) {
 		return true
 	}
@@ -397,8 +310,6 @@ func isTransient(err error) bool {
 	return false
 }
 
-// execWithRetries executes a query and retries a few times when a transient
-// error is detected. It respects the provided context for cancellation.
 func execWithRetries(ctx context.Context, db *sql.DB, query string, args ...interface{}) (sql.Result, error) {
 	var res sql.Result
 	var err error

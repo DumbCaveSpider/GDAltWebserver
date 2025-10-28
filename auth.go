@@ -14,14 +14,8 @@ import (
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
-// ValidateArgonToken validates the provided argon token for accountID by calling
-// Argon's validation endpoint. If valid, it creates/updates the account row with the token.
-//
-// Returns (true, nil) when token is valid, (false, nil) when invalid, and (false, err)
-// when a transient error occurred.
 func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string) (bool, error) {
-	// Always call Argon's validation endpoint to verify token
-	base := "https://argon.globed.dev/v1/validation/check"
+	base := os.Getenv("ARGON_BASE_URL")
 	u, _ := url.Parse(base)
 	q := u.Query()
 	q.Set("account_id", accountID)
@@ -72,7 +66,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		return false, nil
 	}
 
-	// Token is valid - ensure account row exists and update token
+	// Token is valid
 	log.Info("auth: argon validation successful for %s", accountID)
 
 	// Check if account exists
@@ -88,11 +82,10 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 			return false, cerr
 		}
 	} else if err != nil {
-		// Database error
 		log.Error("auth: account lookup error for %s: %v", accountID, err)
 		return false, err
 	} else {
-		// Account exists - update token and timestamp
+		// Account exists
 		log.Info("auth: updating token for existing account %s", accountID)
 		if _, uerr := db.ExecContext(ctx, "UPDATE accounts SET argon_token = ?, token_validated_at = CURRENT_TIMESTAMP WHERE account_id = ?", token, accountID); uerr != nil {
 			log.Error("auth: failed to update token for %s: %v", accountID, uerr)
@@ -112,7 +105,6 @@ type authRequest struct {
 	ArgonToken string `json:"argonToken"`
 }
 
-// UnmarshalJSON accepts accountId as a number or string.
 func (a *authRequest) UnmarshalJSON(data []byte) error {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -141,8 +133,6 @@ func (a *authRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// authHandler accepts POST JSON { accountId, argonToken } and returns plain text
-// "1" when the token is valid for the account, or "-1" on failure.
 func authHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		log.Debug("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
@@ -169,7 +159,6 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build DSN from environment variables (same as other handlers)
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")

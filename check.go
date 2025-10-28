@@ -71,7 +71,6 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build DSN
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
@@ -98,7 +97,6 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify account token
 	var storedToken sql.NullString
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
@@ -116,7 +114,6 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get save_data and level_data lengths in bytes
 	var saveData, levelData sql.NullString
 	r2 := db.QueryRowContext(ctx, "SELECT save_data, level_data FROM saves WHERE account_id = ?", req.AccountId)
 	if err := r2.Scan(&saveData, &levelData); err != nil {

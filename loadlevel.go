@@ -13,8 +13,6 @@ import (
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
-// Reuse LoadRequest type defined in load.go
-
 func init() {
 	http.HandleFunc("/loadlevel", loadLevelHandler)
 }
@@ -45,7 +43,6 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build DSN
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
@@ -73,7 +70,6 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate token using Argon helper
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("loadlevel: token validation error for %s: %v", req.AccountId, verr)
@@ -86,12 +82,10 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch level_data from central saves table
 	var levelData sql.NullString
 	r2 := db.QueryRowContext(ctx, "SELECT level_data FROM saves WHERE account_id = ?", req.AccountId)
 	if err := r2.Scan(&levelData); err != nil {
 		if err == sql.ErrNoRows {
-			// no save found
 			http.Error(w, "-1", http.StatusNotFound)
 			return
 		}

@@ -14,14 +14,12 @@ import (
 )
 
 func main() {
-	// Check DB connectivity once at startup (non-fatal)
 	if err := checkDB(); err != nil {
 		log.Error("DB check failed: %v", err)
 	} else {
 		log.Done("DB check: connected OK")
 	}
 
-	// Run lightweight DB migration to ensure accounts table has token_validated_at
 	if err := ensureAccountsMigration(); err != nil {
 		log.Warn("DB migration warning: %v", err)
 	}
@@ -45,7 +43,6 @@ func main() {
 	}
 }
 
-// checkDB attempts to open and ping the database using env vars. Returns error if unreachable.
 func checkDB() error {
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
@@ -69,7 +66,6 @@ func checkDB() error {
 	return db.PingContext(ctx)
 }
 
-// ensureAccountsMigration ensures the accounts table exists and has token_validated_at column.
 func ensureAccountsMigration() error {
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
@@ -92,7 +88,6 @@ func ensureAccountsMigration() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Ensure accounts table exists with token_validated_at nullable
 	acctCreate := `CREATE TABLE IF NOT EXISTS accounts (
 		account_id VARCHAR(255) PRIMARY KEY,
 		argon_token VARCHAR(512) NOT NULL,
@@ -103,9 +98,7 @@ func ensureAccountsMigration() error {
 		return err
 	}
 
-	// If token_validated_at column doesn't exist, add it
 	if _, err := db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN token_validated_at TIMESTAMP NULL"); err != nil {
-		// Check error text to see if column already exists; if so ignore.
 		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
 			return err
 		}
@@ -113,7 +106,6 @@ func ensureAccountsMigration() error {
 	return nil
 }
 
-// ensureSavesMigration ensures the central saves table exists.
 func ensureSavesMigration() error {
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")

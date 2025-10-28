@@ -99,7 +99,6 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify token
 	var storedToken sql.NullString
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
@@ -119,7 +118,6 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete saves for account
 	if _, err := db.ExecContext(ctx, "DELETE FROM saves WHERE account_id = ?", req.AccountId); err != nil {
 		log.Error("delete: delete save error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)

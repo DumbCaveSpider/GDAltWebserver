@@ -18,7 +18,6 @@ type LoadRequest struct {
 	ArgonToken string `json:"argonToken"`
 }
 
-// UnmarshalJSON tolerant for LoadRequest (accept numeric accountId)
 func (l *LoadRequest) UnmarshalJSON(data []byte) error {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
