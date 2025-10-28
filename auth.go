@@ -36,7 +36,6 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	}
 	defer resp.Body.Close()
 
-	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Warn("auth: error reading argon response for %s: %v", accountID, err)
@@ -53,7 +52,6 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		Valid bool `json:"valid"`
 	}
 
-	// Log the raw response for debugging
 	log.Debug("auth: argon response for %s (status %d): %s", accountID, resp.StatusCode, string(body))
 
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -66,16 +64,13 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		return false, nil
 	}
 
-	// Token is valid
 	log.Info("auth: argon validation successful for %s", accountID)
 
-	// Check if account exists
 	var existingToken sql.NullString
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", accountID)
 	err = row.Scan(&existingToken)
 
 	if err == sql.ErrNoRows {
-		// Account doesn't exist - create it
 		log.Info("auth: creating new account row for %s", accountID)
 		if _, cerr := db.ExecContext(ctx, "INSERT INTO accounts (account_id, argon_token, token_validated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", accountID, token); cerr != nil {
 			log.Error("auth: failed to create account row for %s: %v", accountID, cerr)
@@ -85,7 +80,6 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		log.Error("auth: account lookup error for %s: %v", accountID, err)
 		return false, err
 	} else {
-		// Account exists
 		log.Info("auth: updating token for existing account %s", accountID)
 		if _, uerr := db.ExecContext(ctx, "UPDATE accounts SET argon_token = ?, token_validated_at = CURRENT_TIMESTAMP WHERE account_id = ?", token, accountID); uerr != nil {
 			log.Error("auth: failed to update token for %s: %v", accountID, uerr)
