@@ -11,8 +11,8 @@ You need the following requirements to run the server:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/DumbCaveSpider/GDAlternativeWeb.git
-cd GDAlternativeWeb
+git clone https://github.com/DumbCaveSpider/GDAltWebserver.git
+cd GDAltWebserver
 ```
 
 2. Install dependencies:
