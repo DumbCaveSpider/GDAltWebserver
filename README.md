@@ -53,6 +53,6 @@ npm run dev
 The server will start on `http://localhost:3001` by default.
 
 ## Usage (Client)
-Go to the mod settings of Account Backup in Geometry Dash and set the Backup Server URL to your server's address (e.g., `http://localhost:3001`).
+Go to the mod settings of Account Backup in Geometry Dash and set the Backup Server URL to your server's address (e.g., `http://localhost:3001`). Although this might not work as it expected an actual domain.
 
 <img width="765" height="72" alt="image" src="https://github.com/user-attachments/assets/345ea290-fabc-40ff-a64a-fd0babf763a6" />
