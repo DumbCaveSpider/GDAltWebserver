@@ -147,7 +147,7 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info("load: decompressed save data from %d to %d bytes for %s", 
+	log.Info("load: decompressed save data from %d to %d bytes for %s",
 		len(saveData.String), len(decompressed), req.AccountId)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
