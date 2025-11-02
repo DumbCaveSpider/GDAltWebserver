@@ -1,17 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
@@ -103,70 +99,7 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decompress the level data
-	decompressed, err := decompressLevelData(levelData.String)
-	if err != nil {
-		log.Error("loadlevel: decompression error for %s: %v", req.AccountId, err)
-		http.Error(w, "-1", http.StatusInternalServerError)
-		return
-	}
-
-	log.Info("loadlevel: decompressed level data from %d to %d bytes for %s",
-		len(levelData.String), len(decompressed), req.AccountId)
-
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(decompressed))
-}
-
-// decompressLevelData decompresses base64-encoded gzip data, with fallback for uncompressed data
-func decompressLevelData(data string) (string, error) {
-	if data == "" {
-		return "", nil
-	}
-
-	needsBase64Encode := false
-	encodedData := data
-
-	if strings.HasPrefix(data, "B64GZ:") {
-		encodedData = data[6:] // Remove prefix
-		needsBase64Encode = true
-	} else if strings.HasPrefix(data, "GZ:") {
-		encodedData = data[3:] // Remove prefix
-	} else {
-		isCompressed := !strings.Contains(data, "<") && !strings.Contains(data, ">")
-		if !isCompressed {
-			log.Debug("loadlevel: data appears uncompressed (legacy), returning as-is")
-			return data, nil
-		}
-	}
-
-	// Decode base64
-	compressedBytes, err := base64.StdEncoding.DecodeString(encodedData)
-	if err != nil {
-		log.Warn("loadlevel: base64 decode failed, treating as uncompressed: %v", err)
-		return data, nil
-	}
-
-	// Decompress gzip
-	gzReader, err := gzip.NewReader(bytes.NewReader(compressedBytes))
-	if err != nil {
-		log.Warn("loadlevel: gzip reader failed, treating as uncompressed: %v", err)
-		return data, nil
-	}
-	defer gzReader.Close()
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, gzReader); err != nil {
-		return "", fmt.Errorf("gzip read error: %w", err)
-	}
-
-	result := buf.String()
-
-	if needsBase64Encode {
-		result = base64.StdEncoding.EncodeToString([]byte(result))
-		log.Debug("loadlevel: re-encoded to base64 for client")
-	}
-
-	return result, nil
+	_, _ = w.Write([]byte(levelData.String))
 }

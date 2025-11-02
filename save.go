@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,46 +213,16 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compress save data before storing
-	var compressedSaveData string
-	if req.SaveData != "" {
-		compressed, err := compressData(req.SaveData)
-		if err != nil {
-			log.Error("save: save data compression error: %v", err)
-			http.Error(w, "-1", http.StatusInternalServerError)
-			return
-		}
-		compressedSaveData = compressed
-		log.Info("save: compressed save data from %d to %d bytes (%.1f%% of original)",
-			len(req.SaveData), len(compressedSaveData),
-			float64(len(compressedSaveData))/float64(len(req.SaveData))*100)
-	}
-
-	// Compress level data before storing
-	var compressedLevelData string
-	if req.LevelData != "" {
-		compressed, err := compressData(req.LevelData)
-		if err != nil {
-			log.Error("save: level data compression error: %v", err)
-			http.Error(w, "-1", http.StatusInternalServerError)
-			return
-		}
-		compressedLevelData = compressed
-		log.Info("save: compressed level data from %d to %d bytes (%.1f%% of original)",
-			len(req.LevelData), len(compressedLevelData),
-			float64(len(compressedLevelData))/float64(len(req.LevelData))*100)
-	}
-
 	var updateQuery string
 	var updateArgs []interface{}
 	var setParts []string
 	if req.SaveData != "" {
 		setParts = append(setParts, "save_data = ?")
-		updateArgs = append(updateArgs, compressedSaveData)
+		updateArgs = append(updateArgs, req.SaveData)
 	}
 	if req.LevelData != "" {
 		setParts = append(setParts, "level_data = ?")
-		updateArgs = append(updateArgs, compressedLevelData)
+		updateArgs = append(updateArgs, req.LevelData)
 	}
 	setParts = append(setParts, "created_at = CURRENT_TIMESTAMP")
 	updateQuery = fmt.Sprintf("UPDATE saves SET %s WHERE account_id = ?", strings.Join(setParts, ", "))
@@ -282,8 +249,8 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		saveVal := compressedSaveData
-		levelVal := compressedLevelData
+		saveVal := req.SaveData
+		levelVal := req.LevelData
 		if saveVal == "" {
 			saveVal = ""
 		}
@@ -370,63 +337,4 @@ func execWithRetries(ctx context.Context, db *sql.DB, query string, args ...inte
 		break
 	}
 	return res, err
-}
-
-func compressData(data string) (string, error) {
-	if data == "" {
-		return "", nil
-	}
-
-	dataToCompress := data
-	wasBase64 := false
-
-	if !strings.Contains(data, "<") && !strings.Contains(data, ">") && len(data) > 100 {
-		if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
-			dataToCompress = string(decoded)
-			wasBase64 = true
-			log.Debug("compress: detected base64 input, decoding before compression (%d -> %d bytes)",
-				len(data), len(dataToCompress))
-		}
-	}
-
-	var buf bytes.Buffer
-	gzWriter, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	if err != nil {
-		return "", fmt.Errorf("gzip writer init error: %w", err)
-	}
-
-	if _, err := gzWriter.Write([]byte(dataToCompress)); err != nil {
-		gzWriter.Close()
-		return "", fmt.Errorf("gzip write error: %w", err)
-	}
-
-	if err := gzWriter.Close(); err != nil {
-		return "", fmt.Errorf("gzip close error: %w", err)
-	}
-
-	compressedBytes := buf.Bytes()
-
-	prefix := ""
-	if wasBase64 {
-		prefix = "B64GZ:"
-	} else {
-		prefix = "GZ:"
-	}
-	compressed := prefix + base64.StdEncoding.EncodeToString(compressedBytes)
-
-	originalSize := len(data)
-	compressedBinarySize := len(compressedBytes)
-	compressedBase64Size := len(compressed)
-	ratio := float64(compressedBinarySize) / float64(originalSize) * 100
-	log.Debug("compress: original=%d bytes gzip=%d bytes final=%d bytes ratio=%.1f%% wasBase64=%v",
-		originalSize, compressedBinarySize, compressedBase64Size, ratio, wasBase64)
-
-	//doesn't save at least 10%, don't use it
-	if compressedBase64Size >= int(float64(originalSize)*0.90) {
-		log.Warn("compress: compression ineffective (%.1f%%), storing uncompressed",
-			float64(compressedBase64Size)/float64(originalSize)*100)
-		return data, nil
-	}
-
-	return compressed, nil
 }
