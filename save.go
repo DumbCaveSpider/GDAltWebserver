@@ -135,9 +135,10 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		dbPort = "3306"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=67108864&timeout=30s&readTimeout=30s&writeTimeout=30s",
+		dbUser, dbPass, dbHost, dbPort, dbName)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("mysql", dsn)
@@ -147,6 +148,10 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer db.Close()
+
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := db.PingContext(ctx); err != nil {
 		log.Error("save: db ping error: %v", err)
