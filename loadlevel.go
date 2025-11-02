@@ -125,15 +125,24 @@ func decompressLevelData(data string) (string, error) {
 		return "", nil
 	}
 
-	isCompressed := !strings.Contains(data, "<") && !strings.Contains(data, ">")
+	needsBase64Encode := false
+	encodedData := data
 
-	if !isCompressed {
-		log.Debug("loadlevel: data appears uncompressed, returning as-is")
-		return data, nil
+	if strings.HasPrefix(data, "B64GZ:") {
+		encodedData = data[6:] // Remove prefix
+		needsBase64Encode = true
+	} else if strings.HasPrefix(data, "GZ:") {
+		encodedData = data[3:] // Remove prefix
+	} else {
+		isCompressed := !strings.Contains(data, "<") && !strings.Contains(data, ">")
+		if !isCompressed {
+			log.Debug("loadlevel: data appears uncompressed (legacy), returning as-is")
+			return data, nil
+		}
 	}
 
 	// Decode base64
-	compressedBytes, err := base64.StdEncoding.DecodeString(data)
+	compressedBytes, err := base64.StdEncoding.DecodeString(encodedData)
 	if err != nil {
 		log.Warn("loadlevel: base64 decode failed, treating as uncompressed: %v", err)
 		return data, nil
@@ -152,5 +161,12 @@ func decompressLevelData(data string) (string, error) {
 		return "", fmt.Errorf("gzip read error: %w", err)
 	}
 
-	return buf.String(), nil
+	result := buf.String()
+
+	if needsBase64Encode {
+		result = base64.StdEncoding.EncodeToString([]byte(result))
+		log.Debug("loadlevel: re-encoded to base64 for client")
+	}
+
+	return result, nil
 }

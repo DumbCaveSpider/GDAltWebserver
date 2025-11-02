@@ -372,16 +372,30 @@ func execWithRetries(ctx context.Context, db *sql.DB, query string, args ...inte
 	return res, err
 }
 
-// compressData compresses a string using gzip and returns base64-encoded result
 func compressData(data string) (string, error) {
 	if data == "" {
 		return "", nil
 	}
 
-	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
+	dataToCompress := data
+	wasBase64 := false
 
-	if _, err := gzWriter.Write([]byte(data)); err != nil {
+	if !strings.Contains(data, "<") && !strings.Contains(data, ">") && len(data) > 100 {
+		if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+			dataToCompress = string(decoded)
+			wasBase64 = true
+			log.Debug("compress: detected base64 input, decoding before compression (%d -> %d bytes)",
+				len(data), len(dataToCompress))
+		}
+	}
+
+	var buf bytes.Buffer
+	gzWriter, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if err != nil {
+		return "", fmt.Errorf("gzip writer init error: %w", err)
+	}
+
+	if _, err := gzWriter.Write([]byte(dataToCompress)); err != nil {
 		gzWriter.Close()
 		return "", fmt.Errorf("gzip write error: %w", err)
 	}
@@ -390,13 +404,29 @@ func compressData(data string) (string, error) {
 		return "", fmt.Errorf("gzip close error: %w", err)
 	}
 
-	// Return base64 encoded compressed data
-	compressed := base64.StdEncoding.EncodeToString(buf.Bytes())
+	compressedBytes := buf.Bytes()
+
+	prefix := ""
+	if wasBase64 {
+		prefix = "B64GZ:"
+	} else {
+		prefix = "GZ:"
+	}
+	compressed := prefix + base64.StdEncoding.EncodeToString(compressedBytes)
 
 	originalSize := len(data)
-	compressedSize := len(compressed)
-	ratio := float64(compressedSize) / float64(originalSize) * 100
-	log.Debug("compress: original=%d bytes compressed=%d bytes ratio=%.1f%%", originalSize, compressedSize, ratio)
+	compressedBinarySize := len(compressedBytes)
+	compressedBase64Size := len(compressed)
+	ratio := float64(compressedBinarySize) / float64(originalSize) * 100
+	log.Debug("compress: original=%d bytes gzip=%d bytes final=%d bytes ratio=%.1f%% wasBase64=%v",
+		originalSize, compressedBinarySize, compressedBase64Size, ratio, wasBase64)
+
+	//doesn't save at least 10%, don't use it
+	if compressedBase64Size >= int(float64(originalSize)*0.90) {
+		log.Warn("compress: compression ineffective (%.1f%%), storing uncompressed",
+			float64(compressedBase64Size)/float64(originalSize)*100)
+		return data, nil
+	}
 
 	return compressed, nil
 }

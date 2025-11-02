@@ -68,7 +68,6 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req LoadRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		// try fallback simple parsing (urlencoded not necessary here)
 		log.Warn("load: json unmarshal error: %v", err)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
@@ -107,7 +106,6 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate token using Argon helper
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("load: token validation error for %s: %v", req.AccountId, verr)
@@ -120,7 +118,6 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch save_data from central saves table
 	var saveData sql.NullString
 	r2 := db.QueryRowContext(ctx, "SELECT save_data FROM saves WHERE account_id = ?", req.AccountId)
 	if err := r2.Scan(&saveData); err != nil {
@@ -139,7 +136,6 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decompress the save data
 	decompressed, err := decompressSaveData(saveData.String)
 	if err != nil {
 		log.Error("load: decompression error for %s: %v", req.AccountId, err)
@@ -161,19 +157,24 @@ func decompressSaveData(data string) (string, error) {
 		return "", nil
 	}
 
-	// Try to detect if data is compressed (base64 gzip) or plain text
-	// Base64 only contains alphanumeric + / + = characters
-	// GD save data contains < > and other XML-like characters
-	isCompressed := !strings.Contains(data, "<") && !strings.Contains(data, ">")
+	needsBase64Encode := false
+	encodedData := data
 
-	if !isCompressed {
-		// Data appears to be uncompressed (legacy data)
-		log.Debug("load: data appears uncompressed, returning as-is")
-		return data, nil
+	if strings.HasPrefix(data, "B64GZ:") {
+		encodedData = data[6:] // Remove prefix
+		needsBase64Encode = true
+	} else if strings.HasPrefix(data, "GZ:") {
+		encodedData = data[3:] // Remove prefix
+	} else {
+		isCompressed := !strings.Contains(data, "<") && !strings.Contains(data, ">")
+		if !isCompressed {
+			log.Debug("load: data appears uncompressed (legacy), returning as-is")
+			return data, nil
+		}
 	}
 
 	// Decode base64
-	compressedBytes, err := base64.StdEncoding.DecodeString(data)
+	compressedBytes, err := base64.StdEncoding.DecodeString(encodedData)
 	if err != nil {
 		// If base64 decode fails, assume it's uncompressed
 		log.Warn("load: base64 decode failed, treating as uncompressed: %v", err)
@@ -194,5 +195,12 @@ func decompressSaveData(data string) (string, error) {
 		return "", fmt.Errorf("gzip read error: %w", err)
 	}
 
-	return buf.String(), nil
+	result := buf.String()
+
+	if needsBase64Encode {
+		result = base64.StdEncoding.EncodeToString([]byte(result))
+		log.Debug("load: re-encoded to base64 for client")
+	}
+
+	return result, nil
 }
