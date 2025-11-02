@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -213,16 +216,46 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Compress save data before storing
+	var compressedSaveData string
+	if req.SaveData != "" {
+		compressed, err := compressData(req.SaveData)
+		if err != nil {
+			log.Error("save: save data compression error: %v", err)
+			http.Error(w, "-1", http.StatusInternalServerError)
+			return
+		}
+		compressedSaveData = compressed
+		log.Info("save: compressed save data from %d to %d bytes (%.1f%% of original)",
+			len(req.SaveData), len(compressedSaveData),
+			float64(len(compressedSaveData))/float64(len(req.SaveData))*100)
+	}
+
+	// Compress level data before storing
+	var compressedLevelData string
+	if req.LevelData != "" {
+		compressed, err := compressData(req.LevelData)
+		if err != nil {
+			log.Error("save: level data compression error: %v", err)
+			http.Error(w, "-1", http.StatusInternalServerError)
+			return
+		}
+		compressedLevelData = compressed
+		log.Info("save: compressed level data from %d to %d bytes (%.1f%% of original)",
+			len(req.LevelData), len(compressedLevelData),
+			float64(len(compressedLevelData))/float64(len(req.LevelData))*100)
+	}
+
 	var updateQuery string
 	var updateArgs []interface{}
 	var setParts []string
 	if req.SaveData != "" {
 		setParts = append(setParts, "save_data = ?")
-		updateArgs = append(updateArgs, req.SaveData)
+		updateArgs = append(updateArgs, compressedSaveData)
 	}
 	if req.LevelData != "" {
 		setParts = append(setParts, "level_data = ?")
-		updateArgs = append(updateArgs, req.LevelData)
+		updateArgs = append(updateArgs, compressedLevelData)
 	}
 	setParts = append(setParts, "created_at = CURRENT_TIMESTAMP")
 	updateQuery = fmt.Sprintf("UPDATE saves SET %s WHERE account_id = ?", strings.Join(setParts, ", "))
@@ -249,8 +282,8 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		saveVal := req.SaveData
-		levelVal := req.LevelData
+		saveVal := compressedSaveData
+		levelVal := compressedLevelData
 		if saveVal == "" {
 			saveVal = ""
 		}
@@ -337,4 +370,33 @@ func execWithRetries(ctx context.Context, db *sql.DB, query string, args ...inte
 		break
 	}
 	return res, err
+}
+
+// compressData compresses a string using gzip and returns base64-encoded result
+func compressData(data string) (string, error) {
+	if data == "" {
+		return "", nil
+	}
+
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+
+	if _, err := gzWriter.Write([]byte(data)); err != nil {
+		gzWriter.Close()
+		return "", fmt.Errorf("gzip write error: %w", err)
+	}
+
+	if err := gzWriter.Close(); err != nil {
+		return "", fmt.Errorf("gzip close error: %w", err)
+	}
+
+	// Return base64 encoded compressed data
+	compressed := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	originalSize := len(data)
+	compressedSize := len(compressed)
+	ratio := float64(compressedSize) / float64(originalSize) * 100
+	log.Debug("compress: original=%d bytes compressed=%d bytes ratio=%.1f%%", originalSize, compressedSize, ratio)
+
+	return compressed, nil
 }

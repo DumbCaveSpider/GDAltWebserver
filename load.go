@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
@@ -130,12 +134,65 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the raw save_data as the response body (don't log it)
 	if !saveData.Valid {
 		http.Error(w, "-1", http.StatusNotFound)
 		return
 	}
+
+	// Decompress the save data
+	decompressed, err := decompressSaveData(saveData.String)
+	if err != nil {
+		log.Error("load: decompression error for %s: %v", req.AccountId, err)
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+
+	log.Info("load: decompressed save data from %d to %d bytes for %s", 
+		len(saveData.String), len(decompressed), req.AccountId)
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(saveData.String))
+	_, _ = w.Write([]byte(decompressed))
+}
+
+// decompressSaveData decompresses base64-encoded gzip data, with fallback for uncompressed data
+func decompressSaveData(data string) (string, error) {
+	if data == "" {
+		return "", nil
+	}
+
+	// Try to detect if data is compressed (base64 gzip) or plain text
+	// Base64 only contains alphanumeric + / + = characters
+	// GD save data contains < > and other XML-like characters
+	isCompressed := !strings.Contains(data, "<") && !strings.Contains(data, ">")
+
+	if !isCompressed {
+		// Data appears to be uncompressed (legacy data)
+		log.Debug("load: data appears uncompressed, returning as-is")
+		return data, nil
+	}
+
+	// Decode base64
+	compressedBytes, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		// If base64 decode fails, assume it's uncompressed
+		log.Warn("load: base64 decode failed, treating as uncompressed: %v", err)
+		return data, nil
+	}
+
+	// Decompress gzip
+	gzReader, err := gzip.NewReader(bytes.NewReader(compressedBytes))
+	if err != nil {
+		// If gzip read fails, assume it's uncompressed
+		log.Warn("load: gzip reader failed, treating as uncompressed: %v", err)
+		return data, nil
+	}
+	defer gzReader.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, gzReader); err != nil {
+		return "", fmt.Errorf("gzip read error: %w", err)
+	}
+
+	return buf.String(), nil
 }
