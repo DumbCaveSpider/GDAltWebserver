@@ -229,19 +229,19 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update save_data if present
-	// Check server's max_allowed_packet
-	var maxAllowedPacket int
-	if err := db.QueryRowContext(ctx, "SELECT @@max_allowed_packet").Scan(&maxAllowedPacket); err != nil {
-		log.Warn("save: could not query max_allowed_packet: %v", err)
-		maxAllowedPacket = 4194304 // 4MB default fallback
+	// Use configured max_allowed_packet from env for validation
+	maxAllowedPacket, err := strconv.Atoi(dbMaxAllowedPacket)
+	if err != nil {
+		maxAllowedPacket = 1073741824 // 1GB default if parsing fails
+		log.Warn("save: invalid DB_MAX_ALLOWED_PACKET '%s', defaulting to %d", dbMaxAllowedPacket, maxAllowedPacket)
 	} else {
-		log.Debug("save: server max_allowed_packet is %d bytes", maxAllowedPacket)
+		log.Debug("save: using configured max_allowed_packet %d bytes", maxAllowedPacket)
 	}
 
 	// Update save_data if present
 	if req.SaveData != "" {
 		if len(req.SaveData) > maxAllowedPacket {
-			log.Error("save: save_data size %d exceeds server max_allowed_packet %d", len(req.SaveData), maxAllowedPacket)
+			log.Error("save: save_data size %d exceeds configured max_allowed_packet %d", len(req.SaveData), maxAllowedPacket)
 			http.Error(w, "-1", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -256,7 +256,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Update level_data if present
 	if req.LevelData != "" {
 		if len(req.LevelData) > maxAllowedPacket {
-			log.Error("save: level_data size %d exceeds server max_allowed_packet %d", len(req.LevelData), maxAllowedPacket)
+			log.Error("save: level_data size %d exceeds configured max_allowed_packet %d", len(req.LevelData), maxAllowedPacket)
 			http.Error(w, "-1", http.StatusRequestEntityTooLarge)
 			return
 		}
