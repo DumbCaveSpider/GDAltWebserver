@@ -135,8 +135,13 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		dbPort = "3306"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=1073741824&timeout=30s&readTimeout=30s&writeTimeout=60s",
-		dbUser, dbPass, dbHost, dbPort, dbName)
+	dbMaxAllowedPacket := os.Getenv("DB_MAX_ALLOWED_PACKET")
+	if dbMaxAllowedPacket == "" {
+		dbMaxAllowedPacket = "1073741824"
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=60s",
+		dbUser, dbPass, dbHost, dbPort, dbName, dbMaxAllowedPacket)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
