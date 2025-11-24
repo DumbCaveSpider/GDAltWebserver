@@ -135,7 +135,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		dbPort = "3306"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=1073741824&timeout=30s&readTimeout=30s&writeTimeout=30s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=1073741824&timeout=30s&readTimeout=30s&writeTimeout=60s",
 		dbUser, dbPass, dbHost, dbPort, dbName)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -214,7 +214,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure row exists with empty data if not present
-	// We use INSERT IGNORE so it does nothing if the row already exists.
+	//INSERT IGNORE so it does nothing if the row already exists.
 	// This splits the operation: first ensure row, then update columns separately.
 	ensureStmt := "INSERT IGNORE INTO saves (account_id, save_data, level_data) VALUES (?, '', '')"
 	if _, err := execWithRetries(ctx, db, ensureStmt, req.AccountId); err != nil {
@@ -224,7 +224,22 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update save_data if present
+	// Check server's max_allowed_packet
+	var maxAllowedPacket int
+	if err := db.QueryRowContext(ctx, "SELECT @@max_allowed_packet").Scan(&maxAllowedPacket); err != nil {
+		log.Warn("save: could not query max_allowed_packet: %v", err)
+		maxAllowedPacket = 4194304 // 4MB default fallback
+	} else {
+		log.Debug("save: server max_allowed_packet is %d bytes", maxAllowedPacket)
+	}
+
+	// Update save_data if present
 	if req.SaveData != "" {
+		if len(req.SaveData) > maxAllowedPacket {
+			log.Error("save: save_data size %d exceeds server max_allowed_packet %d", len(req.SaveData), maxAllowedPacket)
+			http.Error(w, "-1", http.StatusRequestEntityTooLarge)
+			return
+		}
 		updateSave := "UPDATE saves SET save_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
 		if _, err := execWithRetries(ctx, db, updateSave, req.SaveData, req.AccountId); err != nil {
 			log.Error("save: update save_data error: %v", err)
@@ -235,6 +250,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Update level_data if present
 	if req.LevelData != "" {
+		if len(req.LevelData) > maxAllowedPacket {
+			log.Error("save: level_data size %d exceeds server max_allowed_packet %d", len(req.LevelData), maxAllowedPacket)
+			http.Error(w, "-1", http.StatusRequestEntityTooLarge)
+			return
+		}
+		log.Debug("save: updating level_data (size=%d)", len(req.LevelData))
 		updateLevel := "UPDATE saves SET level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
 		if _, err := execWithRetries(ctx, db, updateLevel, req.LevelData, req.AccountId); err != nil {
 			log.Error("save: update level_data error: %v", err)
