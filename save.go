@@ -135,7 +135,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		dbPort = "3306"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=67108864&timeout=30s&readTimeout=30s&writeTimeout=30s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=1073741824&timeout=30s&readTimeout=30s&writeTimeout=30s",
 		dbUser, dbPass, dbHost, dbPort, dbName)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -213,52 +213,31 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updateQuery string
-	var updateArgs []interface{}
-	var setParts []string
-	if req.SaveData != "" {
-		setParts = append(setParts, "save_data = ?")
-		updateArgs = append(updateArgs, req.SaveData)
-	}
-	if req.LevelData != "" {
-		setParts = append(setParts, "level_data = ?")
-		updateArgs = append(updateArgs, req.LevelData)
-	}
-	setParts = append(setParts, "created_at = CURRENT_TIMESTAMP")
-	updateQuery = fmt.Sprintf("UPDATE saves SET %s WHERE account_id = ?", strings.Join(setParts, ", "))
-	updateArgs = append(updateArgs, req.AccountId)
-
-	res, err := execWithRetries(ctx, db, updateQuery, updateArgs...)
-	if err != nil {
-		saveSize := len(req.SaveData)
-		levelSize := len(req.LevelData)
-		totalSize := saveSize + levelSize
-		stats := db.Stats()
-		log.Error("save: update central save error: %v", err)
-		log.Debug("save: payload sizes: save=%d bytes level=%d bytes total=%d bytes", saveSize, levelSize, totalSize)
-		log.Debug("save: db stats: OpenConnections=%d InUse=%d Idle=%d WaitCount=%d MaxOpenConnections=%d", stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.MaxOpenConnections)
-
-		if _, perr := execWithRetries(ctx, db, "SET @probe = 1"); perr != nil {
-			log.Error("save: small probe write failed: %v", perr)
-		} else {
-			log.Info("save: small probe write succeeded — large payload may be the cause")
-		}
-
+	// Ensure row exists with empty data if not present
+	// We use INSERT IGNORE so it does nothing if the row already exists.
+	// This splits the operation: first ensure row, then update columns separately.
+	ensureStmt := "INSERT IGNORE INTO saves (account_id, save_data, level_data) VALUES (?, '', '')"
+	if _, err := execWithRetries(ctx, db, ensureStmt, req.AccountId); err != nil {
+		log.Error("save: ensure row error: %v", err)
 		http.Error(w, "-1", http.StatusInternalServerError)
 		return
 	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		saveVal := req.SaveData
-		levelVal := req.LevelData
-		if saveVal == "" {
-			saveVal = ""
+
+	// Update save_data if present
+	if req.SaveData != "" {
+		updateSave := "UPDATE saves SET save_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
+		if _, err := execWithRetries(ctx, db, updateSave, req.SaveData, req.AccountId); err != nil {
+			log.Error("save: update save_data error: %v", err)
+			http.Error(w, "-1", http.StatusInternalServerError)
+			return
 		}
-		if levelVal == "" {
-			levelVal = ""
-		}
-		if _, err := execWithRetries(ctx, db, "INSERT INTO saves (account_id, save_data, level_data) VALUES (?, ?, ?)", req.AccountId, saveVal, levelVal); err != nil {
-			log.Error("save: insert central save error: %v", err)
+	}
+
+	// Update level_data if present
+	if req.LevelData != "" {
+		updateLevel := "UPDATE saves SET level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
+		if _, err := execWithRetries(ctx, db, updateLevel, req.LevelData, req.AccountId); err != nil {
+			log.Error("save: update level_data error: %v", err)
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
 		}
