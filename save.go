@@ -140,7 +140,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		dbMaxAllowedPacket = "1073741824"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=60s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&interpolateParams=true&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=5m",
 		dbUser, dbPass, dbHost, dbPort, dbName, dbMaxAllowedPacket)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -264,6 +264,9 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		updateLevel := "UPDATE saves SET level_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
 		if _, err := execWithRetries(ctx, db, updateLevel, req.LevelData, req.AccountId); err != nil {
 			log.Error("save: update level_data error: %v", err)
+			if strings.Contains(err.Error(), "connection reset by peer") {
+				log.Warn("save: 'connection reset by peer' often indicates that the MySQL server's 'max_allowed_packet' is smaller than the data being sent (%d bytes). Please check your MySQL server configuration (my.cnf/my.ini) and ensure 'max_allowed_packet' is large enough.", len(req.LevelData))
+			}
 			http.Error(w, "-1", http.StatusInternalServerError)
 			return
 		}
