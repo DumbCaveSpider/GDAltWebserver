@@ -109,7 +109,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxAccountDataSize := 16777216 // 16 MiB
+	maxAccountDataSize := 33554432 // 32 MiB
 	if v := os.Getenv("MAX_ACCOUNT_DATA_SIZE_BYTES"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
 			maxAccountDataSize = parsed
