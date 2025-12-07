@@ -90,7 +90,7 @@ func runCleanup() {
 	query := `DELETE a, s 
               FROM accounts a 
               JOIN saves s ON a.account_id = s.account_id 
-              WHERE s.created_at < DATE_SUB(NOW(), INTERVAL 100 DAY)`
+              WHERE s.created_at < DATE_SUB(NOW(), INTERVAL 60 DAY)`
 
 	res, err := db.ExecContext(ctx, query)
 	if err != nil {
