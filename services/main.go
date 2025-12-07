@@ -36,6 +36,8 @@ func main() {
 		_, _ = w.Write([]byte("🗣️🔥"))
 	})
 
+	startCleanupRoutine()
+
 	addr := ":3001"
 	log.Done("starting server on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
@@ -43,20 +45,68 @@ func main() {
 	}
 }
 
-func checkDB() error {
+func openDBConnection() (*sql.DB, error) {
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
 	if dbUser == "" || dbHost == "" || dbName == "" {
-		return fmt.Errorf("missing DB env vars (DB_USER, DB_HOST, DB_NAME required)")
+		return nil, fmt.Errorf("missing DB env vars (DB_USER, DB_HOST, DB_NAME required)")
 	}
 	if dbPort == "" {
 		dbPort = "3306"
 	}
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
-	db, err := sql.Open("mysql", dsn)
+	return sql.Open("mysql", dsn)
+}
+
+func startCleanupRoutine() {
+	go runCleanup()
+
+	// cleanup every 24 hours
+	go func() {
+		log.Info("cleanup: scheduler started (interval: 24h)")
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			runCleanup()
+		}
+	}()
+}
+
+func runCleanup() {
+	log.Debug("cleanup: checking for inactive accounts...")
+	db, err := openDBConnection()
+	if err != nil {
+		log.Error("cleanup: failed to connect to db: %v", err)
+		return
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	query := `DELETE a, s 
+              FROM accounts a 
+              JOIN saves s ON a.account_id = s.account_id 
+              WHERE s.created_at < DATE_SUB(NOW(), INTERVAL 100 DAY)`
+
+	res, err := db.ExecContext(ctx, query)
+	if err != nil {
+		log.Error("cleanup: failed to delete inactive accounts: %v", err)
+		return
+	}
+
+	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
+		log.Info("cleanup: removed %d inactive rows (accounts+saves)", rows)
+	} else {
+		log.Debug("cleanup: no inactive accounts found")
+	}
+}
+
+func checkDB() error {
+	db, err := openDBConnection()
 	if err != nil {
 		return err
 	}
@@ -67,19 +117,7 @@ func checkDB() error {
 }
 
 func ensureAccountsMigration() error {
-	dbUser := os.Getenv("DB_USER")
-	dbPass := os.Getenv("DB_PASS")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	if dbUser == "" || dbHost == "" || dbName == "" {
-		return fmt.Errorf("missing DB env vars for migration")
-	}
-	if dbPort == "" {
-		dbPort = "3306"
-	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
-	db, err := sql.Open("mysql", dsn)
+	db, err := openDBConnection()
 	if err != nil {
 		return err
 	}
@@ -107,19 +145,7 @@ func ensureAccountsMigration() error {
 }
 
 func ensureSavesMigration() error {
-	dbUser := os.Getenv("DB_USER")
-	dbPass := os.Getenv("DB_PASS")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	if dbUser == "" || dbHost == "" || dbName == "" {
-		return fmt.Errorf("missing DB env vars for migration")
-	}
-	if dbPort == "" {
-		dbPort = "3306"
-	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
-	db, err := sql.Open("mysql", dsn)
+	db, err := openDBConnection()
 	if err != nil {
 		return err
 	}

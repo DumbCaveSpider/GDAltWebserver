@@ -8,7 +8,7 @@ const outPath = path.join(__dirname, 'bin', outName);
 
 console.log(`Building binary: ${outPath}`);
 
-const args = ['build', '-o', outPath, '.'];
+const args = ['build', '-o', outPath, './services'];
 const res = spawnSync('go', args, { stdio: 'inherit', shell: false });
 if (res.error) {
   console.error('go build failed:', res.error);

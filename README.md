@@ -20,14 +20,7 @@ cd GDAltWebserver
 ```bash
 npm install
 ```
-
-3. Build the server:
-
-```bash
-npm run build
-```
-
-4. Configure the server by creating a `.env` file in the root directory with the following content:
+3. Configure the server by creating a `.env` file in the root directory with the following content:
 
 ```env
 DB_USER=<your_database_user>
@@ -41,15 +34,15 @@ LOG_LEVEL=1 # 0=Error, 1=Info, 2=Debug
 PORT=3001
 ```
 
-5. Run the server:
+4. Build and run the server:
 
 ```bash
-npm run dev
+npm run prod
 ```
 
 The server will start on `http://localhost:3001` by default.
 
 ## Usage (Client)
-Go to the mod settings of Account Backup in Geometry Dash and set the Backup Server URL to your server's address (e.g., `http://localhost:3001`). Although this might not work as it expected an actual domain.
+Go to the mod settings of Account Backup in Geometry Dash and set the Backup Server URL to your server's address (e.g., `http://localhost:3001`)
 
 <img width="765" height="72" alt="image" src="https://github.com/user-attachments/assets/345ea290-fabc-40ff-a64a-fd0babf763a6" />
