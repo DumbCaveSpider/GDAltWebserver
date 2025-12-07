@@ -2,3 +2,4 @@
 /.env
 /*.zip
 /bin
+admin.go

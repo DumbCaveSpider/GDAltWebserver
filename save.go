@@ -96,27 +96,16 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// hard limit 32 MiB
-	maxLevelDataSize := 33554432
-	if v := os.Getenv("MAX_LEVEL_DATA_SIZE_BYTES"); v != "" {
+	maxDataSize := 33554432
+	if v := os.Getenv("MAX_DATA_SIZE_BYTES"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			maxLevelDataSize = parsed
+			maxDataSize = parsed
 		}
-	}
-	if len(req.LevelData) > maxLevelDataSize {
-		log.Warn("save: levelData size %d exceeds hard limit of %d bytes", len(req.LevelData), maxLevelDataSize)
-		http.Error(w, "-1", http.StatusRequestEntityTooLarge)
-		return
 	}
 
-	maxAccountDataSize := 33554432 // 32 MiB
-	if v := os.Getenv("MAX_ACCOUNT_DATA_SIZE_BYTES"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			maxAccountDataSize = parsed
-		}
-	}
-	if len(req.SaveData) > maxAccountDataSize {
-		log.Warn("save: saveData size %d exceeds hard limit of %d bytes", len(req.SaveData), maxAccountDataSize)
+	totalSize := len(req.LevelData) + len(req.SaveData)
+	if totalSize > maxDataSize {
+		log.Warn("save: combined data size %d exceeds limit of %d bytes", totalSize, maxDataSize)
 		http.Error(w, "-1", http.StatusRequestEntityTooLarge)
 		return
 	}
