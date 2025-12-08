@@ -89,9 +89,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	argonPreview := redactPreview(req.ArgonToken, 80)
 	log.Debug("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
 	if req.AccountId == "" || req.ArgonToken == "" || (req.SaveData == "" && req.LevelData == "") {
-		ct := r.Header.Get("Content-Type")
-		bodyPreview := redactPreview(string(body), 200)
-		log.Warn("save: missing accountId/argonToken or neither saveData nor levelData provided (accountId='%s', saveDataPresent=%v, levelDataPresent=%v, argonTokenPresent=%v) content-type=%s bodyPreview=%s", req.AccountId, req.SaveData != "", req.LevelData != "", req.ArgonToken != "", ct, bodyPreview)
+		log.Warn("save: missing data request from %s", req.AccountId)
 		http.Error(w, "-1", http.StatusBadRequest)
 		return
 	}

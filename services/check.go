@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
@@ -115,13 +116,14 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var saveData, levelData sql.NullString
-	r2 := db.QueryRowContext(ctx, "SELECT save_data, level_data FROM saves WHERE account_id = ?", req.AccountId)
-	if err := r2.Scan(&saveData, &levelData); err != nil {
+	var createdAt sql.NullTime
+	r2 := db.QueryRowContext(ctx, "SELECT save_data, level_data, created_at FROM saves WHERE account_id = ?", req.AccountId)
+	if err := r2.Scan(&saveData, &levelData, &createdAt); err != nil {
 		if err == sql.ErrNoRows {
 			// not found
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"saveData":0,"levelData":0}`))
+			_, _ = w.Write([]byte(`{"saveData":0,"levelData":0,"totalSize":0,"lastSaved":""}`))
 			return
 		}
 		log.Error("check: save lookup error: %v", err)
@@ -136,12 +138,49 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	if levelData.Valid {
 		levelLen = len(levelData.String)
 	}
+	lastSaved := ""
+	lastSavedRelative := ""
+	if createdAt.Valid {
+		lastSaved = createdAt.Time.Format(time.RFC3339)
+		days := int(time.Since(createdAt.Time).Hours() / 24)
+		switch days {
+		case 0:
+			lastSavedRelative = "today"
+		case 1:
+			lastSavedRelative = "1 day ago"
+		default:
+			lastSavedRelative = fmt.Sprintf("%d days ago", days)
+		}
+	}
+
+	maxDataSize := 33554432
+	if v := os.Getenv("MAX_DATA_SIZE_BYTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxDataSize = parsed
+		}
+	}
+
+	totalSize := saveLen + levelLen
+	freeSpace := maxDataSize - totalSize
+	if freeSpace < 0 {
+		freeSpace = 0
+	}
+	freeSpacePercentage := float64(freeSpace) / float64(maxDataSize) * 100
+
 	resp := struct {
-		SaveData  int `json:"saveData"`
-		LevelData int `json:"levelData"`
+		SaveData            int     `json:"saveData"`
+		LevelData           int     `json:"levelData"`
+		TotalSize           int     `json:"totalSize"`
+		LastSaved           string  `json:"lastSaved"`
+		LastSavedRelative   string  `json:"lastSavedRelative"`
+		FreeSpacePercentage float64 `json:"freeSpacePercentage"`
 	}{
-		SaveData:  saveLen,
-		LevelData: levelLen,
+		SaveData:            saveLen,
+		LevelData:           levelLen,
+		TotalSize:           totalSize,
+		LastSaved:           lastSaved,
+		LastSavedRelative:   lastSavedRelative,
+		FreeSpacePercentage: freeSpacePercentage,
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
