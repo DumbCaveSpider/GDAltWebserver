@@ -19,7 +19,9 @@ func init() {
 
 func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "-1", http.StatusMethodNotAllowed)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
 		log.Debug("loadlevel: invalid method %s", r.Method)
 		return
 	}
@@ -27,19 +29,25 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("loadlevel: read body error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
 		return
 	}
 
 	var req LoadRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Error("loadlevel: json unmarshal error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("loadlevel: missing accountId or argonToken")
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
 		return
 	}
 
@@ -59,26 +67,34 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Error("loadlevel: db open error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
 		log.Error("loadlevel: db ping error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("loadlevel: token validation error for %s: %v", req.AccountId, verr)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 	if !ok {
 		log.Warn("loadlevel: token validation failed for %s", req.AccountId)
-		http.Error(w, "-1", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Token validation failed"})
 		return
 	}
 
@@ -86,16 +102,22 @@ func loadLevelHandler(w http.ResponseWriter, r *http.Request) {
 	r2 := db.QueryRowContext(ctx, "SELECT level_data FROM saves WHERE account_id = ?", req.AccountId)
 	if err := r2.Scan(&levelData); err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "-1", http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Level data not found"})
 			return
 		}
 		log.Error("loadlevel: save lookup error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 
 	if !levelData.Valid {
-		http.Error(w, "-1", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Level data invalid"})
 		return
 	}
 

@@ -101,13 +101,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	totalSize := len(req.LevelData) + len(req.SaveData)
-	if totalSize > maxDataSize {
-		log.Warn("save: combined data size %d exceeds limit of %d bytes", totalSize, maxDataSize)
-		http.Error(w, "-1", http.StatusRequestEntityTooLarge)
-		return
-	}
-
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
@@ -215,6 +208,36 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check total storage limit (Combines new data with existing data)
+	var curSaveBytes, curLevelBytes int64
+	if err := db.QueryRowContext(ctx, "SELECT LENGTH(save_data), LENGTH(level_data) FROM saves WHERE account_id = ?", req.AccountId).Scan(&curSaveBytes, &curLevelBytes); err != nil {
+		log.Error("save: size lookup error: %v", err)
+		http.Error(w, "-1", http.StatusInternalServerError)
+		return
+	}
+
+	newSaveSize := curSaveBytes
+	if req.SaveData != "" {
+		newSaveSize = int64(len(req.SaveData))
+	}
+	newLevelSize := curLevelBytes
+	if req.LevelData != "" {
+		newLevelSize = int64(len(req.LevelData))
+	}
+
+	totalProposed := newSaveSize + newLevelSize
+	if totalProposed > int64(maxDataSize) {
+		log.Warn("save: combined data size %d exceeds limit of %d bytes", totalProposed, maxDataSize)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":    "Storage limit exceeded",
+			"limit":    maxDataSize,
+			"required": totalProposed,
+		})
+		return
+	}
+
 	// Update save_data if present
 	// Use configured max_allowed_packet from env for validation
 	maxAllowedPacket, err := strconv.Atoi(dbMaxAllowedPacket)
@@ -229,13 +252,23 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if req.SaveData != "" {
 		if len(req.SaveData) > maxAllowedPacket {
 			log.Error("save: save_data size %d exceeds configured max_allowed_packet %d", len(req.SaveData), maxAllowedPacket)
-			http.Error(w, "-1", http.StatusRequestEntityTooLarge)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":    "Save data size exceeded max allowed packet",
+				"limit":    maxAllowedPacket,
+				"required": len(req.SaveData),
+			})
 			return
 		}
 		updateSave := "UPDATE saves SET save_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
 		if _, err := execWithRetries(ctx, db, updateSave, req.SaveData, req.AccountId); err != nil {
 			log.Error("save: update save_data error: %v", err)
-			http.Error(w, "-1", http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "Internal server error",
+			})
 			return
 		}
 	}
@@ -244,7 +277,13 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if req.LevelData != "" {
 		if len(req.LevelData) > maxAllowedPacket {
 			log.Error("save: level_data size %d exceeds configured max_allowed_packet %d", len(req.LevelData), maxAllowedPacket)
-			http.Error(w, "-1", http.StatusRequestEntityTooLarge)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":    "Level data size exceeded max allowed packet",
+				"limit":    maxAllowedPacket,
+				"required": len(req.LevelData),
+			})
 			return
 		}
 		log.Debug("save: updating level_data (size=%d)", len(req.LevelData))

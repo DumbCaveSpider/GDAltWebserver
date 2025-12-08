@@ -50,7 +50,9 @@ func init() {
 
 func loadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "-1", http.StatusMethodNotAllowed)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
 		log.Debug("load: invalid method %s", r.Method)
 		return
 	}
@@ -58,19 +60,25 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("load: read body error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
 		return
 	}
 
 	var req LoadRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("load: json unmarshal error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("load: missing accountId or argonToken")
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
 		return
 	}
 
@@ -91,26 +99,34 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Error("load: db open error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 	defer db.Close()
 
 	if err := db.PingContext(ctx); err != nil {
 		log.Error("load: db ping error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("load: token validation error for %s: %v", req.AccountId, verr)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 	if !ok {
 		log.Warn("load: token validation failed for %s", req.AccountId)
-		http.Error(w, "-1", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Token validation failed"})
 		return
 	}
 
@@ -119,16 +135,22 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	if err := r2.Scan(&saveData); err != nil {
 		if err == sql.ErrNoRows {
 			// no save found
-			http.Error(w, "-1", http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Save data not found"})
 			return
 		}
 		log.Error("load: save lookup error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 
 	if !saveData.Valid {
-		http.Error(w, "-1", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Save data invalid"})
 		return
 	}
 
