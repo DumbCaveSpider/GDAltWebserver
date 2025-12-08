@@ -50,25 +50,33 @@ func init() {
 
 func checkHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "-1", http.StatusMethodNotAllowed)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
 		log.Debug("check: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("check: read body error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
 		return
 	}
 	var req CheckRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("check: json unmarshal error: %v", err)
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("check: missing accountId or argonToken")
-		http.Error(w, "-1", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
 		return
 	}
 
@@ -88,13 +96,17 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Error("check: db open error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 	defer db.Close()
 	if err := db.PingContext(ctx); err != nil {
 		log.Error("check: db ping error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 
@@ -102,16 +114,22 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
-		http.Error(w, "-1", http.StatusForbidden)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Account not found"})
 		return
 	case nil:
 		if !storedToken.Valid || storedToken.String != req.ArgonToken {
-			http.Error(w, "-1", http.StatusForbidden)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid Argon Token"})
 			return
 		}
 	default:
 		log.Error("check: account lookup error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 
@@ -127,7 +145,9 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Error("check: save lookup error: %v", err)
-		http.Error(w, "-1", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
 	}
 	saveLen := 0
