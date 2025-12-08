@@ -80,6 +80,13 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	maxDataSize := 33554432
+	if v := os.Getenv("MAX_DATA_SIZE_BYTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxDataSize = parsed
+		}
+	}
+
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
@@ -141,7 +148,14 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 			// not found
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"saveData":0,"levelData":0,"totalSize":0,"lastSaved":""}`))
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"saveData":            0,
+				"levelData":           0,
+				"totalSize":           0,
+				"lastSaved":           "",
+				"maxDataSize":         maxDataSize,
+				"freeSpacePercentage": 100.0,
+			})
 			return
 		}
 		log.Error("check: save lookup error: %v", err)
@@ -173,12 +187,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	maxDataSize := 33554432
-	if v := os.Getenv("MAX_DATA_SIZE_BYTES"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			maxDataSize = parsed
-		}
-	}
+	// maxDataSize already retrieved above
 
 	totalSize := saveLen + levelLen
 	freeSpace := maxDataSize - totalSize
@@ -194,6 +203,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		LastSaved           string  `json:"lastSaved"`
 		LastSavedRelative   string  `json:"lastSavedRelative"`
 		FreeSpacePercentage float64 `json:"freeSpacePercentage"`
+		MaxDataSize         int     `json:"maxDataSize"`
 	}{
 		SaveData:            saveLen,
 		LevelData:           levelLen,
@@ -201,6 +211,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		LastSaved:           lastSaved,
 		LastSavedRelative:   lastSavedRelative,
 		FreeSpacePercentage: freeSpacePercentage,
+		MaxDataSize:         maxDataSize,
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
