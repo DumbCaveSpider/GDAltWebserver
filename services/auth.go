@@ -15,6 +15,18 @@ import (
 )
 
 func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string) (bool, error) {
+	// Check cache
+	var cachedToken sql.NullString
+	var validatedAt sql.NullTime
+	err := db.QueryRowContext(ctx, "SELECT argon_token, token_validated_at FROM accounts WHERE account_id = ?", accountID).Scan(&cachedToken, &validatedAt)
+	if err == nil && cachedToken.Valid && cachedToken.String == token && validatedAt.Valid {
+		// Cache valid for 15 minutes
+		if time.Since(validatedAt.Time) < 15*time.Minute {
+			log.Info("auth: using cached validation for %s", accountID)
+			return true, nil
+		}
+	}
+
 	base := os.Getenv("ARGON_BASE_URL")
 	u, _ := url.Parse(base)
 	q := u.Query()
@@ -22,17 +34,45 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	q.Set("authtoken", token)
 	u.RawQuery = q.Encode()
 	argonURL := u.String()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, argonURL, nil)
-	if err != nil {
-		log.Warn("auth: failed to create argon request for %s: %v", accountID, err)
-		return false, err
+
+	var resp *http.Response
+	var reqErr error
+
+	// Retry logic for 429
+	for i := 0; i < 3; i++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, argonURL, nil)
+		if err != nil {
+			log.Warn("auth: failed to create argon request for %s: %v", accountID, err)
+			return false, err
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, reqErr = client.Do(req)
+		if reqErr != nil {
+			log.Warn("auth: argon request error for %s: %v", accountID, reqErr)
+			return false, reqErr
+		}
+
+		if resp.StatusCode == 429 {
+			if i < 2 {
+				resp.Body.Close()
+				log.Warn("auth: argon rate limit checking %s (attempt %d/3), waiting...", accountID, i+1)
+				select {
+				case <-ctx.Done():
+					return false, ctx.Err()
+				case <-time.After(time.Duration(1<<i) * time.Second):
+					continue
+				}
+			}
+		}
+		break
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Warn("auth: argon request error for %s: %v", accountID, err)
-		return false, err
+	if resp == nil {
+		if reqErr != nil {
+			return false, reqErr
+		}
+		return false, fmt.Errorf("unknown error: no response")
 	}
 	defer resp.Body.Close()
 
@@ -44,6 +84,9 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 
 	if resp.StatusCode != http.StatusOK {
 		log.Warn("auth: argon validation HTTP %d for %s: %s", resp.StatusCode, accountID, string(body))
+		if resp.StatusCode == 429 {
+			return false, fmt.Errorf("rate limit exceeded")
+		}
 		return false, nil // invalid token
 	}
 
@@ -67,6 +110,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	log.Info("auth: argon validation successful for %s", accountID)
 
 	var existingToken sql.NullString
+	// Re-check DB for update
 	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", accountID)
 	err = row.Scan(&existingToken)
 

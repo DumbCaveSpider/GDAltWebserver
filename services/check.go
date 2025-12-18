@@ -187,8 +187,6 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// maxDataSize already retrieved above
-
 	totalSize := saveLen + levelLen
 	freeSpace := maxDataSize - totalSize
 	if freeSpace < 0 {
