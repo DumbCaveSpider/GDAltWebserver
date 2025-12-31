@@ -103,6 +103,23 @@ func runCleanup() {
 	} else {
 		log.Debug("cleanup: no inactive accounts found")
 	}
+
+	// Cleanup expired memberships / subscribers
+	subQuery := `UPDATE accounts a 
+				 SET subscriber = 0 
+				 WHERE subscriber = 1 
+				 AND NOT EXISTS (
+					 SELECT 1 FROM memberships m 
+					 WHERE m.account_id = a.account_id 
+					 AND (m.expires_at > NOW() OR m.expires_at IS NULL)
+				 )`
+	if resSub, err := db.ExecContext(ctx, subQuery); err != nil {
+		log.Error("cleanup: failed to update expired subscribers: %v", err)
+	} else {
+		if rows, _ := resSub.RowsAffected(); rows > 0 {
+			log.Info("cleanup: removed subscriber status from %d expired accounts", rows)
+		}
+	}
 }
 
 func checkDB() error {

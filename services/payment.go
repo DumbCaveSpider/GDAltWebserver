@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 	_ "github.com/go-sql-driver/mysql"
@@ -109,12 +110,43 @@ func processMembership(ctx context.Context, req PaymentRequest) error {
 	}
 	defer db.Close()
 
-	insertStmt := `INSERT INTO memberships (kofi_transaction_id, email, discord_username, discord_userid, tier_name) VALUES (?, ?, ?, ?, ?)`
+	var existingID int64
+	var currentExpires sql.NullTime
+	var existingAccountID sql.NullString
 
-	// Use explicit args
-	_, err = db.ExecContext(ctx, insertStmt, req.KofiTransactionID, req.Email, req.DiscordUsername, req.DiscordUserID, req.TierName)
-	if err != nil {
-		return fmt.Errorf("insert error: %v", err)
+	err = db.QueryRowContext(ctx, "SELECT id, expires_at, account_id FROM memberships WHERE email = ? ORDER BY id DESC LIMIT 1", req.Email).Scan(&existingID, &currentExpires, &existingAccountID)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("lookup error: %v", err)
+	}
+
+	if err == nil {
+		start := time.Now()
+		if currentExpires.Valid && currentExpires.Time.After(start) {
+			start = currentExpires.Time
+		}
+		newExpiry := start.AddDate(0, 1, 0) // Add 1 month
+
+		log.Info("payment: updating membership %d for %s (new expiry: %v)", existingID, req.Email, newExpiry)
+		_, err = db.ExecContext(ctx, "UPDATE memberships SET expires_at = ?, kofi_transaction_id = ? WHERE id = ?", newExpiry, req.KofiTransactionID, existingID)
+		if err != nil {
+			return fmt.Errorf("update error: %v", err)
+		}
+
+		// Update subscriber status if account is linked
+		if existingAccountID.Valid && existingAccountID.String != "" {
+			if _, err := db.ExecContext(ctx, "UPDATE accounts SET subscriber = 1 WHERE account_id = ?", existingAccountID.String); err != nil {
+				log.Warn("payment: failed to re-enable subscriber status for %s: %v", existingAccountID.String, err)
+			}
+		}
+
+	} else {
+		newExpiry := time.Now().AddDate(0, 1, 0)
+		log.Info("payment: creating new membership for %s (expiry: %v)", req.Email, newExpiry)
+		insertStmt := `INSERT INTO memberships (kofi_transaction_id, email, discord_username, discord_userid, tier_name, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
+		_, err = db.ExecContext(ctx, insertStmt, req.KofiTransactionID, req.Email, req.DiscordUsername, req.DiscordUserID, req.TierName, newExpiry)
+		if err != nil {
+			return fmt.Errorf("insert error: %v", err)
+		}
 	}
 
 	return nil

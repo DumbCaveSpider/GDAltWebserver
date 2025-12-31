@@ -25,5 +25,7 @@ CREATE TABLE IF NOT EXISTS memberships (
     discord_username VARCHAR(255),
     discord_userid VARCHAR(255),
     tier_name VARCHAR(255),
+    account_id VARCHAR(255),
+    expires_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

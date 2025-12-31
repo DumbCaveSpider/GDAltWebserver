@@ -145,7 +145,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	// Adjust maxDataSize for subscribers
 	if isSubscriber {
 		// Default 128MB
-		maxDataSize = 134217728
+		maxDataSize = 536870912
 		// Override from env if present
 		if v := os.Getenv("SUBSCRIBER_MAX_DATA_SIZE_BYTES"); v != "" {
 			if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
