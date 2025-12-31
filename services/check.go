@@ -118,8 +118,10 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var storedToken sql.NullString
-	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
-	switch err := row.Scan(&storedToken); err {
+	var isSubscriber bool
+	// Note: subscriber column usage
+	row := db.QueryRowContext(ctx, "SELECT argon_token, subscriber FROM accounts WHERE account_id = ?", req.AccountId)
+	switch err := row.Scan(&storedToken, &isSubscriber); err {
 	case sql.ErrNoRows:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusForbidden)
@@ -138,6 +140,18 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
+	}
+
+	// Adjust maxDataSize for subscribers
+	if isSubscriber {
+		// Default 128MB
+		maxDataSize = 134217728
+		// Override from env if present
+		if v := os.Getenv("SUBSCRIBER_MAX_DATA_SIZE_BYTES"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+				maxDataSize = parsed
+			}
+		}
 	}
 
 	var saveData, levelData sql.NullString

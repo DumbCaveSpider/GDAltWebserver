@@ -29,6 +29,10 @@ func main() {
 		log.Warn("DB migration warning (saves): %v", err)
 	}
 
+	if err := ensureMembershipsMigration(); err != nil {
+		log.Warn("DB migration warning (memberships): %v", err)
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Print("pong: %s", r.RemoteAddr)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -137,6 +141,11 @@ func ensureAccountsMigration() error {
 	}
 
 	if _, err := db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN token_validated_at TIMESTAMP NULL"); err != nil {
+		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
+			return err
+		}
+	}
+	if _, err := db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN subscriber BOOLEAN DEFAULT FALSE"); err != nil {
 		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
 			return err
 		}

@@ -188,11 +188,13 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var storedToken sql.NullString
-	row := db.QueryRowContext(ctx, "SELECT argon_token FROM accounts WHERE account_id = ?", req.AccountId)
-	switch err := row.Scan(&storedToken); err {
+	var isSubscriber bool
+	// ubscriber column is TINYINT(1) aka BOOLEAN, can scan into bool
+	row := db.QueryRowContext(ctx, "SELECT argon_token, subscriber FROM accounts WHERE account_id = ?", req.AccountId)
+	switch err := row.Scan(&storedToken, &isSubscriber); err {
 	case sql.ErrNoRows:
 		log.Error("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
-		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token) VALUES (?, ?)", req.AccountId, req.ArgonToken); err != nil {
+		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token, subscriber) VALUES (?, ?, ?)", req.AccountId, req.ArgonToken, false); err != nil {
 			log.Error("save: insert account error: %v", err)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusInternalServerError)
@@ -206,6 +208,19 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
 		return
+	}
+
+	// Update maxDataSize based on subscriber status
+	if isSubscriber {
+		// Default 128MB for subscribers
+		maxDataSize = 134217728
+
+		// Allow override via env var if provided
+		if v := os.Getenv("SUBSCRIBER_MAX_DATA_SIZE_BYTES"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+				maxDataSize = parsed
+			}
+		}
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
