@@ -144,7 +144,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Adjust maxDataSize for subscribers
 	if isSubscriber {
-		// Default 128MB
+		// Default 512MB
 		maxDataSize = 536870912
 		// Override from env if present
 		if v := os.Getenv("SUBSCRIBER_MAX_DATA_SIZE_BYTES"); v != "" {
@@ -169,6 +169,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 				"lastSaved":           "",
 				"maxDataSize":         maxDataSize,
 				"freeSpacePercentage": 100.0,
+				"usedSpacePercentage": 0.0,
 			})
 			return
 		}
@@ -207,6 +208,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		freeSpace = 0
 	}
 	freeSpacePercentage := float64(freeSpace) / float64(maxDataSize) * 100
+	usedSpacePercentage := float64(totalSize) / float64(maxDataSize) * 100
 
 	resp := struct {
 		SaveData            int     `json:"saveData"`
@@ -215,6 +217,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		LastSaved           string  `json:"lastSaved"`
 		LastSavedRelative   string  `json:"lastSavedRelative"`
 		FreeSpacePercentage float64 `json:"freeSpacePercentage"`
+		UsedSpacePercentage float64 `json:"usedSpacePercentage"`
 		MaxDataSize         int     `json:"maxDataSize"`
 	}{
 		SaveData:            saveLen,
@@ -223,6 +226,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		LastSaved:           lastSaved,
 		LastSavedRelative:   lastSavedRelative,
 		FreeSpacePercentage: freeSpacePercentage,
+		UsedSpacePercentage: usedSpacePercentage,
 		MaxDataSize:         maxDataSize,
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
