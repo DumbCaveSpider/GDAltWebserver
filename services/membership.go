@@ -117,7 +117,7 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	if req.AccountId == "" || req.ArgonToken == "" || req.Email == "" {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Email, Account ID or Argon Token"})
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing required field"})
 		return
 	}
 
