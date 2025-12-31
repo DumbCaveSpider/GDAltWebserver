@@ -170,6 +170,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 				"maxDataSize":         maxDataSize,
 				"freeSpacePercentage": 100.0,
 				"usedSpacePercentage": 0.0,
+				"subscriber":          isSubscriber,
 			})
 			return
 		}
@@ -219,6 +220,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		FreeSpacePercentage float64 `json:"freeSpacePercentage"`
 		UsedSpacePercentage float64 `json:"usedSpacePercentage"`
 		MaxDataSize         int     `json:"maxDataSize"`
+		Subscriber          bool    `json:"subscriber"`
 	}{
 		SaveData:            saveLen,
 		LevelData:           levelLen,
@@ -228,6 +230,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		FreeSpacePercentage: freeSpacePercentage,
 		UsedSpacePercentage: usedSpacePercentage,
 		MaxDataSize:         maxDataSize,
+		Subscriber:          isSubscriber,
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
