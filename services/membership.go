@@ -192,6 +192,25 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	// Email found
 	log.Info("membership: found %d matches for email %s (account %s)", count, req.Email, req.AccountId)
 
+	// Check if email is already linked to an account
+	var existingLink string
+	err = db.QueryRowContext(ctx, "SELECT account_id FROM memberships WHERE email = ? AND account_id IS NOT NULL AND account_id != '' LIMIT 1", req.Email).Scan(&existingLink)
+	if err != nil && err != sql.ErrNoRows {
+		log.Error("membership: check link error: %v", err)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		return
+	}
+	if err == nil {
+		// Found an existing link
+		log.Warn("membership: email %s already registered to account %s", req.Email, existingLink)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Email already registered"})
+		return
+	}
+
 	// Transaction to update both tables
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
