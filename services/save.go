@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -72,18 +71,10 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req SaveRequest
 
-	body, readErr := io.ReadAll(r.Body)
-	if readErr != nil {
-		log.Warn("save: read body error: %v", readErr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
-		return
-	}
-
-	if err := json.Unmarshal(body, &req); err != nil {
-		bodyPreview := redactPreview(string(body), 200)
-		log.Warn("save: json unmarshal error: %v content-type=%s bodyPreview=%s", err, r.Header.Get("Content-Type"), bodyPreview)
+	// Use a decoder to stream the request body
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
+		log.Warn("save: json decode error: %v content-type=%s", err, r.Header.Get("Content-Type"))
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
@@ -133,7 +124,8 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&interpolateParams=true&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=5m",
 		dbUser, dbPass, dbHost, dbPort, dbName, dbMaxAllowedPacket)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// Increase context timeout to 5 minutes to allow for large save uploads
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
 	db, err := sql.Open("mysql", dsn)
