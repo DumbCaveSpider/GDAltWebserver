@@ -17,24 +17,12 @@ import (
 )
 
 type PaymentRequest struct {
-	MessageID                  string      `json:"message_id"`
-	Timestamp                  string      `json:"timestamp"`
-	Type                       string      `json:"type"`
-	IsPublic                   bool        `json:"is_public"`
-	FromName                   string      `json:"from_name"`
-	Message                    interface{} `json:"message"` // null or string
-	Amount                     string      `json:"amount"`
-	URL                        string      `json:"url"`
-	Email                      string      `json:"email"`
-	Currency                   string      `json:"currency"`
-	IsSubscriptionPayment      bool        `json:"is_subscription_payment"`
-	IsFirstSubscriptionPayment bool        `json:"is_first_subscription_payment"`
-	KofiTransactionID          string      `json:"kofi_transaction_id"`
-	ShopItems                  interface{} `json:"shop_items"`
-	TierName                   string      `json:"tier_name"`
-	Shipping                   interface{} `json:"shipping"`
-	DiscordUsername            string      `json:"discord_username"`
-	DiscordUserID              string      `json:"discord_userid"`
+	Type              string `json:"type"`
+	TierName          string `json:"tier_name"`
+	Email             string `json:"email"`
+	DiscordUsername   string `json:"discord_username"`
+	DiscordUserID     string `json:"discord_userid"`
+	KofiTransactionID string `json:"kofi_transaction_id"`
 }
 
 func init() {
