@@ -198,7 +198,7 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
-		log.Warn("auth: missing accountId or argonToken from %s (accountId='%s', tokenPresent=%v)", r.RemoteAddr, req.AccountId, req.ArgonToken != "")
+		log.Warn("auth: missing accountId or argonToken (accountId='%s', tokenPresent=%v)", req.AccountId, req.ArgonToken != "")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})

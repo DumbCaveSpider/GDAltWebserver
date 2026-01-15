@@ -82,7 +82,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			log.Warn("save: incomplete JSON body from %s", r.RemoteAddr)
+			log.Warn("save: incomplete JSON body from %s", req.AccountId)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Incomplete JSON body"})
@@ -199,7 +199,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	row := db.QueryRowContext(ctx, "SELECT argon_token, subscriber FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken, &isSubscriber); err {
 	case sql.ErrNoRows:
-		log.Error("save: init POST for new account %s from %s", req.AccountId, r.RemoteAddr)
+		log.Error("save: init POST for new account %s", req.AccountId)
 		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token, subscriber) VALUES (?, ?, ?)", req.AccountId, req.ArgonToken, false); err != nil {
 			log.Error("save: insert account error: %v", err)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
