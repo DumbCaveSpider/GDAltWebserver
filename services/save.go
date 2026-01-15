@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -74,6 +75,19 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// Use a decoder to stream the request body
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Empty request body"})
+			return
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			log.Warn("save: incomplete JSON body from %s", r.RemoteAddr)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Incomplete JSON body"})
+			return
+		}
 		log.Warn("save: json decode error: %v content-type=%s", err, r.Header.Get("Content-Type"))
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
