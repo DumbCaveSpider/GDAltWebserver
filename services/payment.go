@@ -18,7 +18,7 @@ import (
 
 type PaymentRequest struct {
 	Type              string `json:"type"`
-	TierName          string `json:"tier_name"`
+	VerificationToken string `json:"verificationToken"`
 	Email             string `json:"email"`
 	DiscordUsername   string `json:"discord_username"`
 	DiscordUserID     string `json:"discord_userid"`
@@ -56,25 +56,38 @@ func paymentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Required fields check (basic)
+	// Validate Verification Token
+	envToken := os.Getenv("VERIFICATION_TOKEN")
+	if envToken == "" {
+		log.Warn("payment: missing verification token")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing verification token"})
+		return
+	}
+
+	if req.VerificationToken != envToken {
+		log.Warn("payment: invalid verification token for %s", req.Email)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid verification token"})
+		return
+	}
+
 	if req.KofiTransactionID == "" {
 		log.Warn("payment: missing kofi_transaction_id")
 	}
 
-	log.Info("payment: received transaction %s type=%s tier='%s' user='%s'", req.KofiTransactionID, req.Type, req.TierName, req.DiscordUsername)
+	log.Info("payment: received transaction %s type=%s user='%s'", req.KofiTransactionID, req.Type, req.DiscordUsername)
 
-	if req.TierName == "Account Backup Extra" {
-		if err := processMembership(r.Context(), req); err != nil {
-			log.Error("payment: failed to process membership: %v", err)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
-			return
-		}
-		log.Done("payment: processed membership for %s (tier: %s)", req.DiscordUsername, req.TierName)
-	} else {
-		log.Info("payment: ignoring tier '%s'", req.TierName)
+	if err := processMembership(r.Context(), req); err != nil {
+		log.Error("payment: failed to process membership: %v", err)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		return
 	}
+	log.Done("payment: processed membership for %s", req.DiscordUsername)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -131,7 +144,8 @@ func processMembership(ctx context.Context, req PaymentRequest) error {
 		newExpiry := time.Now().AddDate(0, 1, 0)
 		log.Info("payment: creating new membership for %s (expiry: %v)", req.Email, newExpiry)
 		insertStmt := `INSERT INTO memberships (kofi_transaction_id, email, discord_username, discord_userid, tier_name, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
-		_, err = db.ExecContext(ctx, insertStmt, req.KofiTransactionID, req.Email, req.DiscordUsername, req.DiscordUserID, req.TierName, newExpiry)
+
+		_, err = db.ExecContext(ctx, insertStmt, req.KofiTransactionID, req.Email, req.DiscordUsername, req.DiscordUserID, "Account Backup Extra", newExpiry)
 		if err != nil {
 			return fmt.Errorf("insert error: %v", err)
 		}
