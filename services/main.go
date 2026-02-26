@@ -110,19 +110,62 @@ func runCleanup() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	query := `DELETE a, s 
-              FROM accounts a 
-              JOIN saves s ON a.account_id = s.account_id 
-              WHERE s.created_at < DATE_SUB(NOW(), INTERVAL 60 DAY)`
+	var totalDeleted int
+	for {
+		// Process them in chunks of 500 to prevent large gap locks blockading incoming `saves`
+		selectQuery := `SELECT a.account_id 
+						FROM accounts a 
+						JOIN saves s ON a.account_id = s.account_id 
+						WHERE s.created_at < DATE_SUB(NOW(), INTERVAL 60 DAY) 
+						LIMIT 500`
 
-	res, err := DB.ExecContext(ctx, query)
-	if err != nil {
-		log.Error("cleanup: failed to delete inactive accounts: %v", err)
-		return
+		rows, err := DB.QueryContext(ctx, selectQuery)
+		if err != nil {
+			log.Error("cleanup: failed to find inactive accounts: %v", err)
+			break
+		}
+
+		var accountIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err == nil {
+				accountIDs = append(accountIDs, id)
+			}
+		}
+		rows.Close()
+
+		if len(accountIDs) == 0 {
+			break
+		}
+
+		args := make([]interface{}, len(accountIDs))
+		placeholders := make([]string, len(accountIDs))
+		for i, id := range accountIDs {
+			args[i] = id
+			placeholders[i] = "?"
+		}
+		inClause := strings.Join(placeholders, ",")
+
+		// Using bulk deletes reduces index tree lock congestion,
+		// but chunking limits the table-lock impact duration
+		deleteSaves := fmt.Sprintf("DELETE FROM saves WHERE account_id IN (%s)", inClause)
+		_, errSaves := DB.ExecContext(ctx, deleteSaves, args...)
+		if errSaves != nil {
+			log.Warn("cleanup: chunk saves delete error: %v", errSaves)
+		}
+
+		deleteAccounts := fmt.Sprintf("DELETE FROM accounts WHERE account_id IN (%s)", inClause)
+		_, errAcc := DB.ExecContext(ctx, deleteAccounts, args...)
+		if errAcc != nil {
+			log.Warn("cleanup: chunk accounts delete error: %v", errAcc)
+		}
+
+		totalDeleted += len(accountIDs)
+		time.Sleep(100 * time.Millisecond) // Yield the table briefly
 	}
 
-	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
-		log.Info("cleanup: removed %d inactive rows (accounts+saves)", rows)
+	if totalDeleted > 0 {
+		log.Info("cleanup: removed %d inactive rows (accounts+saves)", totalDeleted)
 	} else {
 		log.Debug("cleanup: no inactive accounts found")
 	}
