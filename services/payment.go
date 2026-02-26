@@ -80,7 +80,10 @@ func paymentHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("payment: received transaction %s type=%s user='%s'", req.KofiTransactionID, req.Type, req.DiscordUsername)
 
-	if err := processMembership(r.Context(), req); err != nil {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := processMembership(ctx, req); err != nil {
 		log.Error("payment: failed to process membership: %v", err)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)

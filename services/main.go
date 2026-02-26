@@ -128,7 +128,7 @@ func checkDB() error {
 		return err
 	}
 	defer db.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return db.PingContext(ctx)
 }
@@ -140,7 +140,7 @@ func ensureAccountsMigration() error {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	acctCreate := `CREATE TABLE IF NOT EXISTS accounts (
@@ -173,7 +173,7 @@ func ensureSavesMigration() error {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	createStmt := `CREATE TABLE IF NOT EXISTS saves (
