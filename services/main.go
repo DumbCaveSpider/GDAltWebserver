@@ -64,7 +64,7 @@ func initGlobalDB() error {
 		dbMaxAllowedPacket = "1073741824"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&interpolateParams=true&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=5m",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&interpolateParams=true&maxAllowedPacket=%s&timeout=30s&readTimeout=5m&writeTimeout=5m",
 		dbUser, dbPass, dbHost, dbPort, dbName, dbMaxAllowedPacket)
 
 	db, err := sql.Open("mysql", dsn)
