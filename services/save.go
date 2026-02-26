@@ -400,6 +400,8 @@ func isTransient(err error) bool {
 		return true
 	case strings.Contains(msg, "use of closed network connection"):
 		return true
+	case strings.Contains(msg, "invalid connection"):
+		return true
 	}
 	return false
 }
