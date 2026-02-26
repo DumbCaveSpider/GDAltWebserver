@@ -114,50 +114,18 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dbUser := os.Getenv("DB_USER")
-	dbPass := os.Getenv("DB_PASS")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	if dbUser == "" || dbHost == "" || dbName == "" {
-		log.Error("save: missing DB_* env vars (DB_USER, DB_HOST, DB_NAME required)")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
-		return
-	}
-	if dbPort == "" {
-		dbPort = "3306"
-	}
-
 	dbMaxAllowedPacket := os.Getenv("DB_MAX_ALLOWED_PACKET")
 	if dbMaxAllowedPacket == "" {
 		dbMaxAllowedPacket = "1073741824"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&interpolateParams=true&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=5m",
-		dbUser, dbPass, dbHost, dbPort, dbName, dbMaxAllowedPacket)
-
 	// Increase context timeout to 5 minutes to allow for large save uploads
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		log.Error("save: db open error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
-		return
-	}
-	defer db.Close()
-
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-
-	if err := db.PingContext(ctx); err != nil {
-		log.Error("save: db ping error: %v", err)
+	db := DB
+	if db == nil {
+		log.Error("save: DB not initialized")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})

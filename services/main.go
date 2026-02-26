@@ -13,9 +13,11 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+var DB *sql.DB
+
 func main() {
-	if err := checkDB(); err != nil {
-		log.Error("DB check failed: %v", err)
+	if err := initGlobalDB(); err != nil {
+		log.Error("DB init failed: %v", err)
 	} else {
 		log.Done("DB check: connected OK")
 	}
@@ -45,20 +47,43 @@ func main() {
 	}
 }
 
-func openDBConnection() (*sql.DB, error) {
+func initGlobalDB() error {
 	dbUser := os.Getenv("DB_USER")
 	dbPass := os.Getenv("DB_PASS")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
 	if dbUser == "" || dbHost == "" || dbName == "" {
-		return nil, fmt.Errorf("missing DB env vars (DB_USER, DB_HOST, DB_NAME required)")
+		return fmt.Errorf("missing DB env vars (DB_USER, DB_HOST, DB_NAME required)")
 	}
 	if dbPort == "" {
 		dbPort = "3306"
 	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
-	return sql.Open("mysql", dsn)
+	dbMaxAllowedPacket := os.Getenv("DB_MAX_ALLOWED_PACKET")
+	if dbMaxAllowedPacket == "" {
+		dbMaxAllowedPacket = "1073741824"
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&interpolateParams=true&maxAllowedPacket=%s&timeout=30s&readTimeout=30s&writeTimeout=5m",
+		dbUser, dbPass, dbHost, dbPort, dbName, dbMaxAllowedPacket)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return err
+	}
+
+	db.SetMaxOpenConns(50)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(10 * time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return err
+	}
+
+	DB = db
+	return nil
 }
 
 func startCleanupRoutine() {
@@ -77,12 +102,10 @@ func startCleanupRoutine() {
 
 func runCleanup() {
 	log.Debug("cleanup: checking for inactive accounts...")
-	db, err := openDBConnection()
-	if err != nil {
-		log.Error("cleanup: failed to connect to db: %v", err)
+	if DB == nil {
+		log.Error("cleanup: DB not initialized")
 		return
 	}
-	defer db.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -92,7 +115,7 @@ func runCleanup() {
               JOIN saves s ON a.account_id = s.account_id 
               WHERE s.created_at < DATE_SUB(NOW(), INTERVAL 60 DAY)`
 
-	res, err := db.ExecContext(ctx, query)
+	res, err := DB.ExecContext(ctx, query)
 	if err != nil {
 		log.Error("cleanup: failed to delete inactive accounts: %v", err)
 		return
@@ -113,7 +136,7 @@ func runCleanup() {
 					 WHERE m.account_id = a.account_id 
 					 AND (m.expires_at > NOW() OR m.expires_at IS NULL)
 				 )`
-	if resSub, err := db.ExecContext(ctx, subQuery); err != nil {
+	if resSub, err := DB.ExecContext(ctx, subQuery); err != nil {
 		log.Error("cleanup: failed to update expired subscribers: %v", err)
 	} else {
 		if rows, _ := resSub.RowsAffected(); rows > 0 {
@@ -122,23 +145,10 @@ func runCleanup() {
 	}
 }
 
-func checkDB() error {
-	db, err := openDBConnection()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return db.PingContext(ctx)
-}
-
 func ensureAccountsMigration() error {
-	db, err := openDBConnection()
-	if err != nil {
-		return err
+	if DB == nil {
+		return fmt.Errorf("DB not initialized")
 	}
-	defer db.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -149,16 +159,16 @@ func ensureAccountsMigration() error {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		token_validated_at TIMESTAMP NULL
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
-	if _, err := db.ExecContext(ctx, acctCreate); err != nil {
+	if _, err := DB.ExecContext(ctx, acctCreate); err != nil {
 		return err
 	}
 
-	if _, err := db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN token_validated_at TIMESTAMP NULL"); err != nil {
+	if _, err := DB.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN token_validated_at TIMESTAMP NULL"); err != nil {
 		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
 			return err
 		}
 	}
-	if _, err := db.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN subscriber BOOLEAN DEFAULT FALSE"); err != nil {
+	if _, err := DB.ExecContext(ctx, "ALTER TABLE accounts ADD COLUMN subscriber BOOLEAN DEFAULT FALSE"); err != nil {
 		if !strings.Contains(err.Error(), "Duplicate column name") && !strings.Contains(err.Error(), "exists") {
 			return err
 		}
@@ -167,11 +177,9 @@ func ensureAccountsMigration() error {
 }
 
 func ensureSavesMigration() error {
-	db, err := openDBConnection()
-	if err != nil {
-		return err
+	if DB == nil {
+		return fmt.Errorf("DB not initialized")
 	}
-	defer db.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -184,7 +192,7 @@ func ensureSavesMigration() error {
 		UNIQUE KEY unique_account (account_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
 
-	if _, err := db.ExecContext(ctx, createStmt); err != nil {
+	if _, err := DB.ExecContext(ctx, createStmt); err != nil {
 		return err
 	}
 	return nil

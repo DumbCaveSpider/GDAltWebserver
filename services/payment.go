@@ -97,22 +97,11 @@ func paymentHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func processMembership(ctx context.Context, req PaymentRequest) error {
-	dbUser := os.Getenv("DB_USER")
-	dbPass := os.Getenv("DB_PASS")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-
-	if dbPort == "" {
-		dbPort = "3306"
+	db := DB
+	if db == nil {
+		return fmt.Errorf("db open error: DB not initialized")
 	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4", dbUser, dbPass, dbHost, dbPort, dbName)
-
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return fmt.Errorf("db open error: %v", err)
-	}
-	defer db.Close()
+	var err error
 
 	var existingID int64
 	var currentExpires sql.NullTime
