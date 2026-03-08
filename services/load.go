@@ -49,9 +49,7 @@ func init() {
 
 func loadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Debug("load: invalid method %s", r.Method)
 		return
 	}
@@ -59,25 +57,19 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("load: read body error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
 	}
 
 	var req LoadRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("load: json unmarshal error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("load: missing accountId or argonToken")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
+		http.Error(w, "Missing Account ID or Argon Token", http.StatusBadRequest)
 		return
 	}
 
@@ -87,25 +79,19 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	db := DB
 	if db == nil {
 		log.Error("load: DB not initialized")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("load: token validation error for %s: %v", req.AccountId, verr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
 		log.Warn("load: token validation failed for %s", req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Token validation failed"})
+		http.Error(w, "Token validation failed", http.StatusForbidden)
 		return
 	}
 
@@ -114,22 +100,16 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	if err := r2.Scan(&saveData); err != nil {
 		if err == sql.ErrNoRows {
 			// no save found
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Save data not found"})
+			http.Error(w, "Save data not found", http.StatusNotFound)
 			return
 		}
 		log.Error("load: save lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	if !saveData.Valid {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Save data invalid"})
+		http.Error(w, "Save data invalid", http.StatusNotFound)
 		return
 	}
 

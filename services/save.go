@@ -63,9 +63,7 @@ func init() {
 
 func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Warn("save: invalid method %s", r.Method)
 		return
 	}
@@ -76,22 +74,16 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
 		if errors.Is(err, io.EOF) {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Empty request body"})
+			http.Error(w, "Empty request body", http.StatusBadRequest)
 			return
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Warn("save: incomplete JSON body from %s", req.AccountId)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Incomplete JSON body"})
+			http.Error(w, "Incomplete JSON body", http.StatusBadRequest)
 			return
 		}
 		log.Warn("save: json decode error: %v content-type=%s", err, r.Header.Get("Content-Type"))
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
@@ -101,9 +93,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	log.Debug("save: parsed body as JSON (accountId='%s', saveDataPreview='%s', levelDataPreview='%s', argonTokenPreview='%s')", req.AccountId, savePreview, levelPreview, argonPreview)
 	if req.AccountId == "" || req.ArgonToken == "" || (req.SaveData == "" && req.LevelData == "") {
 		log.Warn("save: missing data request from %s", req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID, Argon Token or Data"})
+		http.Error(w, "Missing Account ID, Argon Token or Data", http.StatusBadRequest)
 		return
 	}
 
@@ -126,9 +116,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	db := DB
 	if db == nil {
 		log.Error("save: DB not initialized")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -142,9 +130,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
 	if _, err := db.ExecContext(ctx, createStmt); err != nil {
 		log.Error("save: create table error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -155,9 +141,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
 	if _, err := db.ExecContext(ctx, acctCreate); err != nil {
 		log.Error("save: create accounts table error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -170,17 +154,13 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		log.Error("save: init POST for new account %s", req.AccountId)
 		if _, err := execWithRetries(ctx, db, "INSERT INTO accounts (account_id, argon_token, subscriber) VALUES (?, ?, ?)", req.AccountId, req.ArgonToken, false); err != nil {
 			log.Error("save: insert account error: %v", err)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	case nil:
 	default:
 		log.Error("save: account lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -200,16 +180,12 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("save: token validation error for %s: %v", req.AccountId, verr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
 		log.Warn("save: token validation failed for %s", req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid Argon Token"})
+		http.Error(w, "Invalid Argon Token", http.StatusForbidden)
 		return
 	}
 
@@ -219,9 +195,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	ensureStmt := "INSERT IGNORE INTO saves (account_id, save_data, level_data) VALUES (?, '', '')"
 	if _, err := execWithRetries(ctx, db, ensureStmt, req.AccountId); err != nil {
 		log.Error("save: ensure row error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -229,9 +203,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	var curSaveBytes, curLevelBytes int64
 	if err := db.QueryRowContext(ctx, "SELECT LENGTH(save_data), LENGTH(level_data) FROM saves WHERE account_id = ?", req.AccountId).Scan(&curSaveBytes, &curLevelBytes); err != nil {
 		log.Error("save: size lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -247,13 +219,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	totalProposed := newSaveSize + newLevelSize
 	if totalProposed > int64(maxDataSize) {
 		log.Warn("save: combined data size %d exceeds limit of %d bytes", totalProposed, maxDataSize)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":    "Storage limit exceeded",
-			"limit":    maxDataSize,
-			"required": totalProposed,
-		})
+		http.Error(w, "Storage limit exceeded", http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -271,23 +237,13 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if req.SaveData != "" {
 		if len(req.SaveData) > maxAllowedPacket {
 			log.Error("save: save_data size %d exceeds configured max_allowed_packet %d", len(req.SaveData), maxAllowedPacket)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusRequestEntityTooLarge)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error":    "Save data size exceeded max allowed packet",
-				"limit":    maxAllowedPacket,
-				"required": len(req.SaveData),
-			})
+			http.Error(w, "Save data size exceeded max allowed packet", http.StatusRequestEntityTooLarge)
 			return
 		}
 		updateSave := "UPDATE saves SET save_data = ?, created_at = CURRENT_TIMESTAMP WHERE account_id = ?"
 		if _, err := execWithRetries(ctx, db, updateSave, req.SaveData, req.AccountId); err != nil {
 			log.Error("save: update save_data error: %v", err)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": "Internal server error",
-			})
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -296,13 +252,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if req.LevelData != "" {
 		if len(req.LevelData) > maxAllowedPacket {
 			log.Error("save: level_data size %d exceeds configured max_allowed_packet %d", len(req.LevelData), maxAllowedPacket)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusRequestEntityTooLarge)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error":    "Level data size exceeded max allowed packet",
-				"limit":    maxAllowedPacket,
-				"required": len(req.LevelData),
-			})
+			http.Error(w, "Level data size exceeded max allowed packet", http.StatusRequestEntityTooLarge)
 			return
 		}
 		log.Debug("save: updating level_data (size=%d)", len(req.LevelData))
@@ -312,9 +262,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(err.Error(), "connection reset by peer") {
 				log.Warn("save: 'connection reset by peer' often indicates that the MySQL server's 'max_allowed_packet' is smaller than the data being sent (%d bytes). Please check your MySQL server configuration (my.cnf/my.ini) and ensure 'max_allowed_packet' is large enough.", len(req.LevelData))
 			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}

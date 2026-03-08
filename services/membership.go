@@ -89,34 +89,27 @@ func ensureMembershipsTable(ctx context.Context, db *sql.DB) error {
 
 func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
+		log.Warn("membership: invalid method %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		log.Warn("membership: read body error: %v", readErr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
 	}
 
 	var req MembershipRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("membership: json unmarshal error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
 	if req.AccountId == "" || req.ArgonToken == "" || req.Email == "" {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing required field"})
+		http.Error(w, "Missing required field", http.StatusBadRequest)
 		return
 	}
 
@@ -126,18 +119,14 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	db := DB
 	if db == nil {
 		log.Error("membership: DB not initialized")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	var err error
 
 	if err := ensureMembershipsTable(ctx, db); err != nil {
 		log.Error("membership: table migration error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -145,16 +134,12 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("membership: token validation error for %s: %v", req.AccountId, verr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
 		log.Warn("membership: token invalid for %s", req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid Argon Token"})
+		http.Error(w, "Invalid Argon Token", http.StatusForbidden)
 		return
 	}
 
@@ -162,18 +147,14 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memberships WHERE email = ?", req.Email).Scan(&count)
 	if err != nil {
 		log.Error("membership: email lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	if count == 0 {
 		// Email not found in memberships
 		log.Info("membership: email %s not found for account %s", req.Email, req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Email not found in memberships"})
+		http.Error(w, "Email not found in memberships", http.StatusNotFound)
 		return
 	}
 
@@ -185,17 +166,13 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRowContext(ctx, "SELECT account_id FROM memberships WHERE email = ? AND account_id IS NOT NULL AND account_id != '' LIMIT 1", req.Email).Scan(&existingLink)
 	if err != nil && err != sql.ErrNoRows {
 		log.Error("membership: check link error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	if err == nil {
 		// Found an existing link
 		log.Warn("membership: email %s already registered to account %s", req.Email, existingLink)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Email already registered"})
+		http.Error(w, "Email already registered", http.StatusConflict)
 		return
 	}
 
@@ -203,9 +180,7 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		log.Error("membership: tx begin error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
@@ -213,9 +188,7 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	// 1. Link email to accountId in memberships table
 	if _, err := tx.ExecContext(ctx, "UPDATE memberships SET account_id = ? WHERE email = ?", req.AccountId, req.Email); err != nil {
 		log.Error("membership: failed to link memberships: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -224,9 +197,7 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM memberships WHERE account_id = ? AND (expires_at > NOW() OR expires_at IS NULL)", req.AccountId).Scan(&validCount)
 	if err != nil {
 		log.Error("membership: failed to check validity: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -234,9 +205,7 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 		// Grant subscriber status
 		if _, err := tx.ExecContext(ctx, "UPDATE accounts SET subscriber = 1 WHERE account_id = ?", req.AccountId); err != nil {
 			log.Error("membership: failed to update account subscriber status: %v", err)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 		log.Info("membership: granted subscriber status to %s", req.AccountId)
@@ -246,9 +215,7 @@ func membershipHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := tx.Commit(); err != nil {
 		log.Error("membership: tx commit error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 

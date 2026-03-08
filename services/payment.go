@@ -31,28 +31,22 @@ func init() {
 
 func paymentHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
 		log.Warn("payment: invalid method %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		log.Warn("payment: read body error: %v", readErr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
 	}
 
 	var req PaymentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("payment: json unmarshal error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
@@ -60,17 +54,13 @@ func paymentHandler(w http.ResponseWriter, r *http.Request) {
 	envToken := os.Getenv("VERIFICATION_TOKEN")
 	if envToken == "" {
 		log.Warn("payment: missing verification token")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing verification token"})
+		http.Error(w, "Missing verification token", http.StatusForbidden)
 		return
 	}
 
 	if req.VerificationToken != envToken {
 		log.Warn("payment: invalid verification token for %s", req.Email)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid verification token"})
+		http.Error(w, "Invalid verification token", http.StatusForbidden)
 		return
 	}
 
@@ -85,9 +75,7 @@ func paymentHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := processMembership(ctx, req); err != nil {
 		log.Error("payment: failed to process membership: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	log.Done("payment: processed membership for %s", req.DiscordUsername)

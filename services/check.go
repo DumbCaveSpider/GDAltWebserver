@@ -50,33 +50,25 @@ func init() {
 
 func checkHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Debug("check: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("check: read body error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
 	}
 	var req CheckRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("check: json unmarshal error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("check: missing accountId or argonToken")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
+		http.Error(w, "Missing Account ID or Argon Token", http.StatusBadRequest)
 		return
 	}
 
@@ -93,9 +85,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	db := DB
 	if db == nil {
 		log.Error("check: DB not initialized")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -105,22 +95,16 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	row := db.QueryRowContext(ctx, "SELECT argon_token, subscriber FROM accounts WHERE account_id = ?", req.AccountId)
 	switch err := row.Scan(&storedToken, &isSubscriber); err {
 	case sql.ErrNoRows:
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Account not found"})
+		http.Error(w, "Account not found", http.StatusForbidden)
 		return
 	case nil:
 		if !storedToken.Valid || storedToken.String != req.ArgonToken {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid Argon Token"})
+			http.Error(w, "Invalid Argon Token", http.StatusForbidden)
 			return
 		}
 	default:
 		log.Error("check: account lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -141,7 +125,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	r2 := db.QueryRowContext(ctx, "SELECT save_data, level_data, created_at FROM saves WHERE account_id = ?", req.AccountId)
 	if err := r2.Scan(&saveData, &levelData, &createdAt); err != nil {
 		if err == sql.ErrNoRows {
-			// not found
+			// not found (new account)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -157,9 +141,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Error("check: save lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	saveLen := 0

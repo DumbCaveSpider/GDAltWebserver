@@ -48,33 +48,25 @@ func init() {
 
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Debug("delete: invalid method %s", r.Method)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("delete: read body error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
 	}
 	var req DeleteRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("delete: json unmarshal error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("delete: missing accountId or argonToken")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
+		http.Error(w, "Missing Account ID or Argon Token", http.StatusBadRequest)
 		return
 	}
 
@@ -84,9 +76,7 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	db := DB
 	if db == nil {
 		log.Error("delete: DB not initialized")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -95,31 +85,23 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	switch err := row.Scan(&storedToken); err {
 	case sql.ErrNoRows:
 		log.Warn("delete: account not found %s", req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Account not found"})
+		http.Error(w, "Account not found", http.StatusForbidden)
 		return
 	case nil:
 		if !storedToken.Valid || storedToken.String != req.ArgonToken {
 			log.Warn("delete: argon token mismatch for account %s", req.AccountId)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid argon token"})
+			http.Error(w, "Invalid argon token", http.StatusForbidden)
 			return
 		}
 	default:
 		log.Error("delete: account lookup error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	if _, err := db.ExecContext(ctx, "DELETE FROM saves WHERE account_id = ?", req.AccountId); err != nil {
 		log.Error("delete: delete save error: %v", err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 

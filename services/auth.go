@@ -174,34 +174,26 @@ func (a *authRequest) UnmarshalJSON(data []byte) error {
 func authHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		log.Debug("auth: invalid method %s from %s", r.Method, r.RemoteAddr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Method not allowed"})
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Warn("auth: read body error from %s: %v", r.RemoteAddr, err)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read request"})
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
 	}
 
 	var req authRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Warn("auth: json unmarshal error from %s: %v (body len=%d)", r.RemoteAddr, err, len(body))
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 	if req.AccountId == "" || req.ArgonToken == "" {
 		log.Warn("auth: missing accountId or argonToken (accountId='%s', tokenPresent=%v)", req.AccountId, req.ArgonToken != "")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Missing Account ID or Argon Token"})
+		http.Error(w, "Missing Account ID or Argon Token", http.StatusBadRequest)
 		return
 	}
 
@@ -211,25 +203,19 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 	db := DB
 	if db == nil {
 		log.Error("auth: DB not initialized")
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	ok, verr := ValidateArgonToken(ctx, db, req.AccountId, req.ArgonToken)
 	if verr != nil {
 		log.Error("auth: token validation error for %s: %v", req.AccountId, verr)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Internal server error"})
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
 		log.Warn("auth: token invalid for %s", req.AccountId)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid Argon Token"})
+		http.Error(w, "Invalid Argon Token", http.StatusForbidden)
 		return
 	}
 
