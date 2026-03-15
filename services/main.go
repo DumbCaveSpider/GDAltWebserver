@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -255,7 +256,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if authToken != "" {
 			reqToken := r.Header.Get("Authorization")
-			if reqToken != authToken {
+			if subtle.ConstantTimeCompare([]byte(reqToken), []byte(authToken)) != 1 {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
