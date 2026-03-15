@@ -256,7 +256,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if authToken != "" {
 			reqToken := r.Header.Get("Authorization")
 			if reqToken != authToken {
-				http.NotFound(w, r)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 		}
