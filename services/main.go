@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -14,8 +15,14 @@ import (
 )
 
 var DB *sql.DB
+var authToken string
 
 func main() {
+	authToken = os.Getenv("AUTHORIZATION_TOKEN")
+	if authToken != "" {
+		log.Info("authorization: enabled (token validation required)")
+	}
+
 	if err := initGlobalDB(); err != nil {
 		log.Error("DB init failed: %v", err)
 	} else {
@@ -31,16 +38,20 @@ func main() {
 		log.Warn("DB migration warning (saves): %v", err)
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		//log.Debug("pong: %s", r.RemoteAddr)
 		//w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		//w.WriteHeader(http.StatusOK)
 		//_, _ = w.Write([]byte(""))
-	})
+	}))
 
 	startCleanupRoutine()
 
-	addr := ":3001"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3001"
+	}
+	addr := ":" + port
 	log.Done("starting server on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Error("server failed: %v", err)
@@ -239,4 +250,17 @@ func ensureSavesMigration() error {
 		return err
 	}
 	return nil
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if authToken != "" {
+			reqToken := r.Header.Get("Authorization")
+			if subtle.ConstantTimeCompare([]byte(reqToken), []byte(authToken)) != 1 {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		next(w, r)
+	}
 }
