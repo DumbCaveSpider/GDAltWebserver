@@ -1,0 +1,12 @@
+bin/
+node_modules/
+.env
+*.exe
+.git
+.gitignore
+README.md
+LICENSE
+build.js
+start.js
+package.json
+package-lock.json
