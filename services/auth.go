@@ -46,6 +46,10 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 			return false, err
 		}
 
+		if authHeader := os.Getenv("ARGON_AUTH_HEADER"); authHeader != "" {
+			req.Header.Add("Authorization", authHeader)
+		}
+
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, reqErr = client.Do(req)
 		if reqErr != nil {
