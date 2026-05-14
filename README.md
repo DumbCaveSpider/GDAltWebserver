@@ -3,7 +3,40 @@
 The backend server for [GD Account Backup](https://github.com/DumbCaveSpider/GDAccountBackup).
 
 ## Usage (Server)
-### Docker (Recommended)
+### Docker Compose (Recommended)
+1. Install [Docker](https://www.docker.com/)
+
+2. Clone the repository:
+
+```bash
+git clone https://github.com/DumbCaveSpider/GDAltWebserver.git
+cd GDAltWebserver
+```
+
+3. Create a `.env` file in the root directory:
+
+```env
+DB_USER=<your_database_user>
+DB_ROOT_PASS=<your_database_root_password>
+DB_PASS=<your_database_password>
+DB_NAME=<your_database_name>
+ARGON_BASE_URL=https://argon.globed.dev/v1/validation/check
+MAX_DATA_SIZE_BYTES=33554432
+LOG_LEVEL=1 # 0=Debug, 1=Info, 2=Warn
+PORT=3001
+```
+
+The database will be automatically set up and initialized using the provided credentials.
+
+4. Start the services:
+
+```bash
+docker compose up -d
+```
+
+The server will be available at http://localhost:3001.
+
+### Docker (Manual)
 Before starting, ensure you have a MySQL database with `schema.sql` applied.
 
 1. Install [Docker](https://www.docker.com/)
