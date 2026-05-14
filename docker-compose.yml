@@ -12,7 +12,7 @@ services:
       mariadb:
         condition: service_healthy
   mariadb:
-    image: mariadb:latest
+    image: mariadb:11
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
       MYSQL_DATABASE: ${DB_NAME}
