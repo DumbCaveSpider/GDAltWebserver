@@ -20,7 +20,7 @@ DB_USER=<your_database_user>
 DB_ROOT_PASS=<your_database_root_password>
 DB_PASS=<your_database_password>
 DB_NAME=<your_database_name>
-ARGON_BASE_URL=https://argon.globed.dev/v1/validation/check
+ARGON_BASE_URL=https://argon.globed.dev/v2/token/validate
 MAX_DATA_SIZE_BYTES=33554432
 LOG_LEVEL=1 # 0=Debug, 1=Info, 2=Warn
 PORT=3001
@@ -56,7 +56,7 @@ DB_PASS=<your_database_password>
 DB_HOST=<your_database_host>
 DB_PORT=<your_database_port>
 DB_NAME=<your_database_name>
-ARGON_BASE_URL=https://argon.globed.dev/v1/validation/check
+ARGON_BASE_URL=https://argon.globed.dev/v2/token/validate
 MAX_DATA_SIZE_BYTES=33554432
 LOG_LEVEL=1 # 0=Debug, 1=Info, 2=Warn
 PORT=3001

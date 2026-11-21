@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
@@ -28,23 +29,36 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	}
 
 	base := os.Getenv("ARGON_BASE_URL")
-	u, _ := url.Parse(base)
-	q := u.Query()
-	q.Set("account_id", accountID)
-	q.Set("authtoken", token)
-	u.RawQuery = q.Encode()
-	argonURL := u.String()
+	if base == "" {
+		base = "https://argon.globed.dev/v2/token/validate"
+	}
+	argonURL := strings.TrimRight(base, "/")
+	if strings.HasSuffix(argonURL, "/v1/validation/check") {
+		argonURL = strings.TrimSuffix(argonURL, "/v1/validation/check") + "/v2/token/validate"
+	} else if strings.HasSuffix(argonURL, "/v2") {
+		argonURL += "/token/validate"
+	}
+
+	body, err := json.Marshal(struct {
+		Token string `json:"token"`
+	}{
+		Token: token,
+	})
+	if err != nil {
+		return false, err
+	}
 
 	var resp *http.Response
 	var reqErr error
 
 	// Retry logic for 429
 	for i := 0; i < 3; i++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, argonURL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, argonURL, bytes.NewReader(body))
 		if err != nil {
 			log.Warn("auth: failed to create argon request for %s: %v", accountID, err)
 			return false, err
 		}
+		req.Header.Set("Content-Type", "application/json")
 
 		if authHeader := os.Getenv("ARGON_AUTH_HEADER"); authHeader != "" {
 			req.Header.Add("Authorization", authHeader)
@@ -80,7 +94,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
 	if err != nil {
 		log.Warn("auth: error reading argon response for %s: %v", accountID, err)
 		return false, err
@@ -94,9 +108,12 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		return false, nil // invalid token
 	}
 
-	// Parse response expecting JSON: { valid: true/false }
+	// Parse response and verify the token belongs to the requested account.
 	var out struct {
-		Valid bool `json:"valid"`
+		Valid       bool `json:"valid"`
+		AccountData *struct {
+			AccountID json.Number `json:"account_id"`
+		} `json:"account_data"`
 	}
 
 	log.Debug("auth: argon response for %s (status %d): %s", accountID, resp.StatusCode, string(body))
@@ -108,6 +125,14 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 
 	if !out.Valid {
 		log.Warn("auth: argon validation returned valid=false for %s", accountID)
+		return false, nil
+	}
+	if out.AccountData == nil {
+		log.Warn("auth: argon validation returned no account_data for %s", accountID)
+		return false, nil
+	}
+	if strings.TrimSpace(out.AccountData.AccountID.String()) != strings.TrimSpace(accountID) {
+		log.Warn("auth: argon account mismatch for %s (returned %s)", accountID, out.AccountData.AccountID)
 		return false, nil
 	}
 
