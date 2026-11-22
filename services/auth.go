@@ -15,6 +15,17 @@ import (
 	log "github.com/DumbCaveSpider/GDAlternativeWeb/log"
 )
 
+func argonAuthHeader() string {
+	cred := strings.TrimSpace(os.Getenv("ARGON_API_KEY"))
+	if cred == "" {
+		return ""
+	}
+	if !strings.Contains(cred, " ") {
+		return "Bearer " + cred
+	}
+	return cred
+}
+
 func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string) (bool, error) {
 	// Check cache
 	var cachedToken sql.NullString
@@ -33,9 +44,7 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		base = "https://argon.globed.dev/v2/token/validate"
 	}
 	argonURL := strings.TrimRight(base, "/")
-	if strings.HasSuffix(argonURL, "/v1/validation/check") {
-		argonURL = strings.TrimSuffix(argonURL, "/v1/validation/check") + "/v2/token/validate"
-	} else if strings.HasSuffix(argonURL, "/v2") {
+	if strings.HasSuffix(argonURL, "/v2") {
 		argonURL += "/token/validate"
 	}
 
@@ -60,8 +69,8 @@ func ValidateArgonToken(ctx context.Context, db *sql.DB, accountID, token string
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		if authHeader := os.Getenv("ARGON_AUTH_HEADER"); authHeader != "" {
-			req.Header.Add("Authorization", authHeader)
+		if authHeader := argonAuthHeader(); authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
 		}
 
 		client := &http.Client{Timeout: 10 * time.Second}
